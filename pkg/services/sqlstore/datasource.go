@@ -298,7 +298,7 @@ func (ss *SQLStore) UpdateCorrelations(ctx context.Context, cmd *datasources.Upd
 		}
 
 		// TODO: should we also check for version here instead (like UpdateDatasource)?
-		affected, err := sess.Where("uid=? and org_id=?", cmd.SourceUID, cmd.OrgId).Omit("json_data").Update(ds)
+		affected, err := sess.Where("uid=? and org_id=?", cmd.SourceUID, cmd.OrgId).MustCols("correlations").Omit("json_data").Update(ds)
 		if err != nil {
 			return err
 		}

@@ -178,6 +178,13 @@ type UpdateCorrelationsCommand struct {
 	Result       []Correlation
 }
 
+// DeleteCorrelationCommand deletes a correlation
+type DeleteCorrelationCommand struct {
+	OrgID     int64
+	SourceUID string
+	TargetUID string
+}
+
 // Function for updating secrets along with datasources, to ensure atomicity
 type UpdateSecretFn func() error
 
