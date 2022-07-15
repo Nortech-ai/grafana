@@ -12,7 +12,6 @@ import { PanelData } from './panel';
 import { GrafanaPlugin, PluginMeta } from './plugin';
 import { DataQuery } from './query';
 import { RawTimeRange, TimeRange } from './time';
-import { CustomVariableSupport, DataSourceVariableSupport, StandardVariableSupport } from './variables';
 
 import { DataSourceRef, WithAccessControlMetadata } from '.';
 
@@ -341,10 +340,7 @@ abstract class DataSourceApi<
    * Defines new variable support
    * @alpha -- experimental
    */
-  variables?:
-    | StandardVariableSupport<DataSourceApi<TQuery, TOptions>>
-    | CustomVariableSupport<DataSourceApi<TQuery, TOptions>>
-    | DataSourceVariableSupport<DataSourceApi<TQuery, TOptions>>;
+  variables?: any
 }
 
 export interface MetadataInspectorProps<

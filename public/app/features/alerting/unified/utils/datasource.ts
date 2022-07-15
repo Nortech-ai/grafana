@@ -47,7 +47,7 @@ export function getAlertManagerDataSources() {
 
 const grafanaAlertManagerDataSource: AlertManagerDataSource = {
   name: GRAFANA_RULES_SOURCE_NAME,
-  imgUrl: 'public/img/grafana_icon.svg',
+  imgUrl: 'public/img/nortech_favicon.svg',
 };
 
 // Used only as a fallback for Alert Group plugin
