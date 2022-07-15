@@ -12,7 +12,6 @@ import { PanelData } from './panel';
 import { GrafanaPlugin, PluginMeta } from './plugin';
 import { DataQuery } from './query';
 import { RawTimeRange, TimeRange } from './time';
-import { CustomVariableSupport, DataSourceVariableSupport, StandardVariableSupport } from './variables';
 
 import { DataSourceRef, WithAccessControlMetadata } from '.';
 
