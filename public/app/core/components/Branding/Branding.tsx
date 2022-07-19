@@ -43,7 +43,7 @@ const LoginBackground: FC<BrandComponentProps> = ({ className, children }) => {
 };
 
 const MenuLogo: FC<BrandComponentProps> = ({ className }) => {
-  return <img className={className} src="public/img/nortech_favicon.svg" alt="Grafana" />;
+  return <img className={className} src="public/img/nortech_favicon.svg" alt="SensAI" />;
 };
 
 const LoginBoxBackground = () => {
@@ -59,7 +59,7 @@ export class Branding {
   static LoginBackground = LoginBackground;
   static MenuLogo = MenuLogo;
   static LoginBoxBackground = LoginBoxBackground;
-  static AppTitle = 'Grafana';
+  static AppTitle = 'SensAI';
   static LoginTitle = 'Welcome to SensAI';
   static GetLoginSubTitle = (): null | string => {
     return null;
