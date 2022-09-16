@@ -2,6 +2,8 @@
 // The MIT License (MIT)
 // Copyright (c) 2014 Call-Em-All
 
+import {NORTECH_THEME} from "./NortechPalette";
+
 /** @internal */
 export type ThemeSpacingOptions = {
   gridSize?: number;
@@ -27,6 +29,9 @@ export interface ThemeSpacing {
     left: ThemeSpacingArgument
   ): string;
   gridSize: number;
+  
+  nortech: typeof NORTECH_THEME["spacing"];
+  // nortech: string;
 }
 
 /** @internal */
@@ -66,6 +71,7 @@ export function createSpacing(options: ThemeSpacingOptions = {}): ThemeSpacing {
   };
 
   spacing.gridSize = gridSize;
+  spacing.nortech = NORTECH_THEME.spacing;
 
   return spacing;
 }

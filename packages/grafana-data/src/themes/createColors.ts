@@ -1,8 +1,11 @@
 import { merge } from 'lodash';
 
+import { NORTECH_THEME } from "./NortechPalette";
+const nColors = NORTECH_THEME.colors;
 import { alpha, darken, emphasize, getContrastRatio, lighten } from './colorManipulator';
 import { palette } from './palette';
 import { DeepPartial, ThemeRichColor } from './types';
+
 
 /** @internal */
 export type ThemeColorsMode = 'light' | 'dark';
@@ -69,7 +72,7 @@ export interface ThemeColorsBase<TColor> {
   tonalOffset: number;
 }
 
-export interface ThemeHoverStrengh {}
+export interface ThemeHoverStrengh { }
 
 /** @beta */
 export interface ThemeColors extends ThemeColorsBase<ThemeRichColor> {
@@ -77,6 +80,7 @@ export interface ThemeColors extends ThemeColorsBase<ThemeRichColor> {
   getContrastText(background: string, threshold?: number): string;
   /* Brighten or darken a color by specified factor (0-1) */
   emphasize(color: string, amount?: number): string;
+  nortech: typeof NORTECH_THEME["colors"];
 }
 
 /** @internal */
@@ -86,7 +90,7 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   mode: ThemeColorsMode = 'dark';
 
   // Used to get more white opacity colors
-  whiteBase = '204, 204, 220';
+  whiteBase = NORTECH_THEME.colorsRgb.gray[0]; // old '204, 204, 220';
 
   border = {
     weak: `rgba(${this.whiteBase}, 0.07)`,
@@ -98,13 +102,13 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
     primary: `rgb(${this.whiteBase})`,
     secondary: `rgba(${this.whiteBase}, 0.65)`,
     disabled: `rgba(${this.whiteBase}, 0.6)`,
-    link: palette.blueDarkText,
+    link: nColors.purple[4],//palette.blueDarkText,
     maxContrast: palette.white,
   };
 
   primary = {
-    main: palette.blueDarkMain,
-    text: palette.blueDarkText,
+    main: nColors.brand[6],//  Buttons odl palette.blueDarkMain,
+    text: palette.white, //palette.blueDarkText,
     border: palette.blueDarkText,
   };
 
@@ -150,8 +154,8 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   };
 
   gradients = {
-    brandHorizontal: 'linear-gradient(270deg, #F55F3E 0%, #FF8833 100%)',
-    brandVertical: 'linear-gradient(0.01deg, #F55F3E 0.01%, #FF8833 99.99%)',
+    brandHorizontal: `linear-gradient(270deg, ${nColors.green[6]} 0%, ${nColors.green[4]} 100%)`,                    // brandHorizontal: 'linear-gradient(270deg, #F55F3E 0%, #FF8833 100%)',
+    brandVertical: `linear-gradient(0.01deg, ${nColors.green[3]} 0.01%, ${nColors.green[6]} 99.99%)`,   // brandVertical: 'linear-gradient(0.01deg, #F55F3E 0.01%, #FF8833 99.99%)',
   };
 
   contrastThreshold = 3;
@@ -253,6 +257,7 @@ export function createColors(colors: ThemeColorsInput): ThemeColors {
     tonalOffset = base.tonalOffset,
     hoverFactor = base.hoverFactor,
     contrastThreshold = base.contrastThreshold,
+
     ...other
   } = colors;
 
@@ -288,22 +293,25 @@ export function createColors(colors: ThemeColorsInput): ThemeColors {
     return color as ThemeRichColor;
   };
 
-  return merge(
-    {
-      ...base,
-      primary: getRichColor({ color: primary, name: 'primary' }),
-      secondary: getRichColor({ color: secondary, name: 'secondary' }),
-      info: getRichColor({ color: info, name: 'info' }),
-      error: getRichColor({ color: error, name: 'error' }),
-      success: getRichColor({ color: success, name: 'success' }),
-      warning: getRichColor({ color: warning, name: 'warning' }),
-      getContrastText,
-      emphasize: (color: string, factor?: number) => {
-        return emphasize(color, factor ?? hoverFactor);
+  return {
+    ...merge(
+      {
+        ...base,
+        primary: getRichColor({ color: primary, name: 'primary' }),
+        secondary: getRichColor({ color: secondary, name: 'secondary' }),
+        info: getRichColor({ color: info, name: 'info' }),
+        error: getRichColor({ color: error, name: 'error' }),
+        success: getRichColor({ color: success, name: 'success' }),
+        warning: getRichColor({ color: warning, name: 'warning' }),
+        getContrastText,
+        emphasize: (color: string, factor?: number) => {
+          return emphasize(color, factor ?? hoverFactor);
+        },
+
       },
-    },
-    other
-  );
+      other
+    ), nortech: NORTECH_THEME.colors
+  };
 }
 
 interface GetRichColorProps {
