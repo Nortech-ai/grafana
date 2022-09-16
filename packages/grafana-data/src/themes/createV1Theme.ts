@@ -1,6 +1,8 @@
 import { GrafanaTheme, GrafanaThemeCommons, GrafanaThemeType } from '../types';
 
+import { NORTECH_THEME } from "./NortechPalette";
 import { GrafanaTheme2 } from './types';
+
 
 export function createV1Theme(theme: Omit<GrafanaTheme2, 'v1'>): GrafanaTheme {
   const oldCommon: GrafanaThemeCommons = {
@@ -242,8 +244,8 @@ const commonColorsPalette = {
   gray05: '#0b0c0e',
 
   // New blues palette used by next-gen form elements
-  blue95: '#5794f2', // blue95
-  blue85: '#33a2e5', // blueText
+  blue95: NORTECH_THEME.colors.gray[0], // blue95 Title and icons
+  blue85: 'red', // blueText
   blue80: '#3274d9', // blue80
   blue77: '#1f60c4', // blue77
 

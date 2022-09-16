@@ -55,7 +55,7 @@ export function createComponents(colors: ThemeColors, shadows: ThemeShadows): Th
   const panel = {
     padding: 1,
     headerHeight: 4,
-    background: colors.background.primary,
+    background: colors.nortech.dark[6], //Widget color. Yarn Start required.
     borderColor: colors.border.weak,
     boxShadow: 'none',
   };

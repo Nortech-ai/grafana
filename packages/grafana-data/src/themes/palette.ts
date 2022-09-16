@@ -1,11 +1,15 @@
+import { NORTECH_THEME } from "./NortechPalette";
+const nColors = NORTECH_THEME.colors;
+
 export const palette = {
+
   white: '#FFFFFF',
   black: '#000000',
 
   gray25: '#2c3235',
-  gray15: '#22252b', //'#202226',
-  gray10: '#181b1f', // old '#141619',
-  gray05: '#111217', // old '#0b0c0e',
+  gray15: '#22252b', //Active Buttons and some Widget elements //'#202226',
+  gray10: nColors.dark[8], //'#181b1f',  //older '#141619',
+  gray05: nColors.dark[7], //'#111217', // old '#0b0c0e',
 
   // new from figma,
   darkLayer0: '#18181A',
@@ -24,8 +28,8 @@ export const palette = {
   // from figma
   lightBorder1: '#E4E7E7',
 
-  blueDarkMain: '#3D71D9', // '#4165F5',
-  blueDarkText: '#6E9FFF', // '#58a6ff', //'#33a2e5', // '#5790FF',
+  blueDarkMain: '#3D71D9',
+  blueDarkText: '#58a6ff', //'#33a2e5', // '#5790FF',
   redDarkMain: '#D10E5C',
   redDarkText: '#FF5286',
   greenDarkMain: '#1A7F4B',
