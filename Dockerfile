@@ -2,6 +2,8 @@ FROM node:16-alpine3.15 as js-builder
 
 ENV NODE_OPTIONS=--max_old_space_size=8000
 
+RUN apk add --no-cache gcc g++ make clang build-base python3
+
 WORKDIR /grafana
 
 COPY package.json yarn.lock .yarnrc.yml ./
