@@ -6,6 +6,23 @@ import (
 	"github.com/grafana/grafana/pkg/services/navtree"
 )
 
+type NortechBranding struct {
+	Name                string       `json:"name"`
+	LogoUrl             template.URL `json:"logoUrl"`
+	LogoUrlDark         template.URL `json:"logoUrlDark"`
+	IconUrl             template.URL `json:"iconUrl"`
+	IconUrlDark         template.URL `json:"iconUrlDark"`
+	PrimaryColor        string       `json:"primaryColor"`
+	PrimaryColorDark    string       `json:"primaryColorDark"`
+	WarnColor           string       `json:"warnColor"`
+	WarnColorDark       string       `json:"warnColorDark"`
+	BackgroundColor     string       `json:"backgroundColor"`
+	BackgroundColorDark string       `json:"backgroundColorDark"`
+	FontUrl             template.URL `json:"fontUrl"`
+	FontColor           string       `json:"fontColor"`
+	FontColorDark       string       `json:"fontColorDark"`
+}
+
 type IndexViewData struct {
 	User                                *CurrentUser
 	Settings                            *FrontendSettingsDTO
@@ -34,6 +51,7 @@ type IndexViewData struct {
 	Nonce           string
 	NewsFeedEnabled bool
 	Assets          *EntryPointAssets // Includes CDN info
+	Branding        *NortechBranding
 }
 
 type EntryPointAssets struct {

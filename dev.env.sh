@@ -1,0 +1,25 @@
+export GF_AUTH_BASIC_ENABLED="false"
+export GF_AUTH_DISABLE_LOGIN_FORM="true"
+export GF_AUTH_PROXY_AUTO_SIGN_UP="true"
+export GF_AUTH_PROXY_ENABLED="true"
+export GF_AUTH_PROXY_HEADER_NAME=X-Email
+export GF_AUTH_PROXY_HEADER_PROPERTY=email
+export GF_AUTH_PROXY_HEADERS="Name:X-Name Role:X-Grafana-Role Email:X-Email Groups:X-Urn%3Azitadel:iam:user:resourceowner:name"
+export GF_DASHBOARDS_MIN_REFRESH_INTERVAL=100ms
+
+export GF_SERVER_ROOT_URL=https://grafana.default-shared-group.apps.dev.nor.tech/
+export GF_USERS_ALLOW_SIGN_UP="false"
+export NORTECH_BACKGROUND_COLOR='#e0e3ed'
+export NORTECH_BACKGROUND_COLOR_DARK='#04071e'
+export NORTECH_FONT_COLOR='#141821'
+export NORTECH_FONT_COLOR_DARK='#edf0f8'
+export NORTECH_FONT_URL=https://accounts.apps.dev.nor.tech/assets/v1/245615445023920420/policy/label/font-245674162780126926
+export NORTECH_ICON_URL=https://accounts.apps.dev.nor.tech/assets/v1/245615445023920420/policy/label/icon-245674407073169102
+export NORTECH_ICON_URL_DARK=https://accounts.apps.dev.nor.tech/assets/v1/245615445023920420/policy/label/icon-dark-245674147428974286
+export NORTECH_LOGO_URL=https://accounts.apps.dev.nor.tech/assets/v1/245615445023920420/policy/label/logo-245674396302196430
+export NORTECH_LOGO_URL_DARK=https://accounts.apps.dev.nor.tech/assets/v1/245615445023920420/policy/label/logo-dark-245674131792608974
+export NORTECH_NAME="Grafana SRG-default-shared-group"
+export NORTECH_PRIMARY_COLOR='#61af8c'
+export NORTECH_PRIMARY_COLOR_DARK='#6ce0ac'
+export NORTECH_WARN_COLOR='#f64000'
+export NORTECH_WARN_COLOR_DARK='#f64000'

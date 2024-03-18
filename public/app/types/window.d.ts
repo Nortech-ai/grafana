@@ -7,6 +7,22 @@ export declare global {
     public_cdn_path: string;
     nonce: string | undefined;
     System: typeof System;
+    nortechCustomization?: {
+      name: string;
+      logoUrl: string;
+      logoUrlDark: string;
+      iconUrl: string;
+      iconUrlDark: string;
+      primaryColor: string;
+      primaryColorDark: string;
+      warnColor: string;
+      warnColorDark: string;
+      backgroundColor: string;
+      backgroundColorDark: string;
+      fontUrl: string;
+      fontColor: string;
+      fontColorDark: string;
+    };
   }
 
   // Augment DOMParser to accept TrustedType sanitised content

@@ -15,7 +15,7 @@ const GrafanaManagedRuleType = ({ selected = false, disabled, onClick }: SharedP
           Transform data with expressions.
         </span>
       }
-      image="public/img/grafana_icon.svg"
+      image={window.nortechCustomization?.iconUrl || 'public/img/grafana_icon.svg'}
       selected={selected}
       disabled={disabled}
       value={RuleFormType.grafana}

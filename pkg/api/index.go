@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/grafana/grafana/pkg/api/dtos"
@@ -137,6 +139,22 @@ func (hs *HTTPServer) setIndexViewData(c *contextmodel.ReqContext) (*dtos.IndexV
 		LoadingLogo:                         "public/img/grafana_icon.svg",
 		IsDevelopmentEnv:                    hs.Cfg.Env == setting.Dev,
 		Assets:                              assets,
+		Branding: &dtos.NortechBranding{
+			Name:                os.Getenv("NORTECH_NAME"),
+			LogoUrl:             template.URL(os.Getenv("NORTECH_LOGO_URL")),
+			LogoUrlDark:         template.URL(os.Getenv("NORTECH_LOGO_URL_DARK")),
+			IconUrl:             template.URL(os.Getenv("NORTECH_ICON_URL")),
+			IconUrlDark:         template.URL(os.Getenv("NORTECH_ICON_URL_DARK")),
+			PrimaryColor:        os.Getenv("NORTECH_PRIMARY_COLOR"),
+			PrimaryColorDark:    os.Getenv("NORTECH_PRIMARY_COLOR_DARK"),
+			WarnColor:           os.Getenv("NORTECH_WARN_COLOR"),
+			WarnColorDark:       os.Getenv("NORTECH_WARN_COLOR_DARK"),
+			BackgroundColor:     os.Getenv("NORTECH_BACKGROUND_COLOR"),
+			BackgroundColorDark: os.Getenv("NORTECH_BACKGROUND_COLOR_DARK"),
+			FontUrl:             template.URL(os.Getenv("NORTECH_FONT_URL")),
+			FontColor:           os.Getenv("NORTECH_FONT_COLOR"),
+			FontColorDark:       os.Getenv("NORTECH_FONT_COLOR_DARK"),
+		},
 	}
 
 	if hs.Cfg.CSPEnabled {

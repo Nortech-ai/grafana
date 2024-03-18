@@ -84,6 +84,76 @@ export interface ThemeColors extends ThemeColorsBase<ThemeRichColor> {
   emphasize(color: string, amount?: number): string;
 }
 
+function hexToRgb(hex: string) {
+  // Remove the hash at the start if it's there
+  hex = hex.replace(/^#/, '');
+
+  // Parse the hex color
+  let bigint = parseInt(hex, 16);
+
+  // If the hex code is invalid, return null
+  if (isNaN(bigint)) {
+    return null;
+  }
+
+  // Extract the red, green, and blue values
+  let r = (bigint >> 16) & 255;
+  let g = (bigint >> 8) & 255;
+  let b = bigint & 255;
+
+  return `${r}, ${g}, ${b}`;
+}
+
+function updatedHexColor(hex: string, amount: number): string {
+  // Convert hex to RGB
+  let r = parseInt(hex.slice(1, 3), 16);
+  let g = parseInt(hex.slice(3, 5), 16);
+  let b = parseInt(hex.slice(5, 7), 16);
+
+  // Calculate the adjustment value
+  let adjust = 255 * amount;
+
+  // Increase each component by the adjustment value
+  r = Math.min(255, r + adjust);
+  r = Math.max(0, r);
+  g = Math.min(255, g + adjust);
+  g = Math.max(0, g);
+  b = Math.min(255, b + adjust);
+  b = Math.max(0, b);
+
+  // Convert back to hex and return
+  return `#${Math.round(r).toString(16).padStart(2, '0')}${Math.round(g).toString(16).padStart(2, '0')}${Math.round(b)
+    .toString(16)
+    .padStart(2, '0')}`;
+}
+
+const nortechPalette = {
+  primaryColor:
+    (typeof process !== 'undefined' && process.env.PRIMARY_COLOR) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.primaryColor),
+  primaryColorDark:
+    (typeof process !== 'undefined' && process.env.PRIMARY_COLOR_DARK) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.primaryColorDark),
+  warnColor:
+    (typeof process !== 'undefined' && process.env.WARN_COLOR) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.warnColor),
+  warnColorDark:
+    (typeof process !== 'undefined' && process.env.WARN_COLOR_DARK) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.warnColorDark),
+  backgroundColor:
+    (typeof process !== 'undefined' && process.env.BACKGROUND_COLOR) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.backgroundColor),
+  backgroundColorDark:
+    (typeof process !== 'undefined' && process.env.BACKGROUND_COLOR_DARK) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.backgroundColorDark),
+  fontColor:
+    (typeof process !== 'undefined' && process.env.FONT_COLOR) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.fontColor),
+  fontColorDark:
+    (typeof process !== 'undefined' && process.env.FONT_COLOR_DARK) ||
+    (typeof window !== 'undefined' && window.nortechCustomization?.fontColorDark),
+};
+
 /** @internal */
 export type ThemeColorsInput = DeepPartial<ThemeColorsBase<ThemeRichColor>>;
 
@@ -91,7 +161,7 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   mode: ThemeColorsMode = 'dark';
 
   // Used to get more white opacity colors
-  whiteBase = '204, 204, 220';
+  whiteBase = nortechPalette.fontColorDark ? hexToRgb(nortechPalette.fontColorDark) : '204, 204, 220';
 
   border = {
     weak: `rgba(${this.whiteBase}, 0.12)`,
@@ -108,9 +178,15 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   };
 
   primary = {
-    main: palette.blueDarkMain,
-    text: palette.blueDarkText,
-    border: palette.blueDarkText,
+    main: nortechPalette.backgroundColorDark
+      ? updatedHexColor(nortechPalette.backgroundColorDark, 0.2)
+      : palette.blueDarkMain,
+    text: nortechPalette.backgroundColorDark
+      ? updatedHexColor(nortechPalette.backgroundColorDark, 0.3)
+      : palette.blueDarkText,
+    border: nortechPalette.backgroundColorDark
+      ? updatedHexColor(nortechPalette.backgroundColorDark, 0.3)
+      : palette.blueDarkText,
   };
 
   secondary = {
@@ -125,24 +201,30 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   info = this.primary;
 
   error = {
-    main: palette.redDarkMain,
-    text: palette.redDarkText,
+    main: nortechPalette.warnColorDark ? updatedHexColor(nortechPalette.warnColorDark, -0.2) : palette.redDarkMain,
+    text: nortechPalette.warnColorDark ? updatedHexColor(nortechPalette.warnColorDark, -0.1) : palette.redDarkText,
   };
 
   success = {
-    main: palette.greenDarkMain,
-    text: palette.greenDarkText,
+    main: nortechPalette.primaryColorDark || palette.greenDarkMain,
+    text: nortechPalette.primaryColorDark
+      ? updatedHexColor(nortechPalette.primaryColorDark, 0.15)
+      : palette.greenDarkText,
   };
 
   warning = {
-    main: palette.orangeDarkMain,
-    text: palette.orangeDarkText,
+    main: nortechPalette.warnColorDark || palette.orangeDarkMain,
+    text: nortechPalette.warnColorDark ? updatedHexColor(nortechPalette.warnColorDark, 0.2) : palette.orangeDarkText,
   };
 
   background = {
-    canvas: palette.gray05,
-    primary: palette.gray10,
-    secondary: palette.gray15,
+    canvas: nortechPalette.backgroundColorDark || palette.gray05,
+    primary: nortechPalette.backgroundColorDark
+      ? updatedHexColor(nortechPalette.backgroundColorDark, 0.05)
+      : palette.gray10,
+    secondary: nortechPalette.backgroundColorDark
+      ? updatedHexColor(nortechPalette.backgroundColorDark, 0.1)
+      : palette.gray15,
   };
 
   action = {
@@ -169,12 +251,18 @@ class DarkColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
 class LightColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   mode: ThemeColorsMode = 'light';
 
-  blackBase = '36, 41, 46';
+  blackBase = nortechPalette.fontColor ? hexToRgb(nortechPalette.fontColor) : '36, 41, 46';
 
   primary = {
-    main: palette.blueLightMain,
-    border: palette.blueLightText,
-    text: palette.blueLightText,
+    main: nortechPalette.backgroundColor
+      ? updatedHexColor(nortechPalette.backgroundColor, -0.2)
+      : palette.blueLightMain,
+    border: nortechPalette.backgroundColor
+      ? updatedHexColor(nortechPalette.backgroundColor, -0.3)
+      : palette.blueLightText,
+    text: nortechPalette.backgroundColor
+      ? updatedHexColor(nortechPalette.backgroundColor, -0.3)
+      : palette.blueLightText,
   };
 
   text = {
@@ -201,30 +289,34 @@ class LightColors implements ThemeColorsBase<Partial<ThemeRichColor>> {
   };
 
   info = {
-    main: palette.blueLightMain,
-    text: palette.blueLightText,
+    main: nortechPalette.backgroundColor
+      ? updatedHexColor(nortechPalette.backgroundColor, -0.2)
+      : palette.blueLightMain,
+    text: nortechPalette.backgroundColor
+      ? updatedHexColor(nortechPalette.backgroundColor, -0.3)
+      : palette.blueLightText,
   };
 
   error = {
-    main: palette.redLightMain,
-    text: palette.redLightText,
-    border: palette.redLightText,
+    main: nortechPalette.warnColor ? updatedHexColor(nortechPalette.warnColor, -0.2) : palette.redLightMain,
+    text: nortechPalette.warnColor ? updatedHexColor(nortechPalette.warnColor, -0.1) : palette.redLightText,
+    border: nortechPalette.warnColor ? updatedHexColor(nortechPalette.warnColor, -0.1) : palette.redLightText,
   };
 
   success = {
-    main: palette.greenLightMain,
-    text: palette.greenLightText,
+    main: nortechPalette.primaryColor || palette.greenLightMain,
+    text: nortechPalette.primaryColor ? updatedHexColor(nortechPalette.primaryColor, 0.15) : palette.greenLightText,
   };
 
   warning = {
-    main: palette.orangeLightMain,
-    text: palette.orangeLightText,
+    main: nortechPalette.warnColor || palette.orangeLightMain,
+    text: nortechPalette.warnColor ? updatedHexColor(nortechPalette.warnColor, 0.2) : palette.orangeLightText,
   };
 
   background = {
-    canvas: palette.gray90,
-    primary: palette.white,
-    secondary: palette.gray100,
+    canvas: nortechPalette.backgroundColor || palette.gray90,
+    primary: nortechPalette.backgroundColor ? updatedHexColor(nortechPalette.backgroundColor, 0.05) : palette.white,
+    secondary: nortechPalette.backgroundColor ? updatedHexColor(nortechPalette.backgroundColor, 0.1) : palette.gray100,
   };
 
   action = {

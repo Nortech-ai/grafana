@@ -103,7 +103,23 @@ export class BackendSrv implements BackendService {
   }
 
   async request<T = any>(options: BackendSrvRequest): Promise<T> {
-    return await lastValueFrom(this.fetch<T>(options).pipe(map((response: FetchResponse<T>) => response.data)));
+    try {
+      return await lastValueFrom(
+        this.fetch<T>(options).pipe(
+          map((response: FetchResponse<T>) => {
+            if (response.status === 401) {
+              window.location.reload();
+            }
+            return response.data;
+          })
+        )
+      );
+    } catch (e) {
+      if ((e as any).status === 401) {
+        window.location.reload();
+      }
+      throw e;
+    }
   }
 
   fetch<T>(options: BackendSrvRequest): Observable<FetchResponse<T>> {
