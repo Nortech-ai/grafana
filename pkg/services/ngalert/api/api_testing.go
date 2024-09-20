@@ -17,9 +17,9 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
-	"github.com/grafana/grafana/pkg/services/auth/identity"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/datasources"
@@ -66,14 +66,14 @@ func (srv TestingApiSrv) RouteTestGrafanaRuleConfig(c *contextmodel.ReqContext, 
 		body.RuleGroup,
 		srv.cfg.BaseInterval,
 		c.SignedInUser.GetOrgID(),
-		folder,
-		srv.cfg,
+		folder.UID,
+		RuleLimitsFromConfig(srv.cfg, srv.featureManager),
 	)
 	if err != nil {
 		return ErrResp(http.StatusBadRequest, err, "")
 	}
 
-	if err := srv.authz.AuthorizeAccessToRuleGroup(c.Req.Context(), c.SignedInUser, ngmodels.RulesGroup{rule}); err != nil {
+	if err := srv.authz.AuthorizeDatasourceAccessForRule(c.Req.Context(), c.SignedInUser, rule); err != nil {
 		return response.ErrOrFallback(http.StatusInternalServerError, "failed to authorize access to rule group", err)
 	}
 
@@ -83,7 +83,7 @@ func (srv TestingApiSrv) RouteTestGrafanaRuleConfig(c *contextmodel.ReqContext, 
 		}
 	}
 
-	evaluator, err := srv.evaluator.Create(eval.NewContext(c.Req.Context(), c.SignedInUser), rule.GetEvalCondition())
+	evaluator, err := srv.evaluator.Create(eval.NewContext(c.Req.Context(), c.SignedInUser), rule.GetEvalCondition().WithSource("preview"))
 	if err != nil {
 		return ErrResp(http.StatusBadRequest, err, "Failed to build evaluator for queries and expressions")
 	}
@@ -111,7 +111,8 @@ func (srv TestingApiSrv) RouteTestGrafanaRuleConfig(c *contextmodel.ReqContext, 
 		now,
 		rule,
 		results,
-		state.GetRuleExtraLabels(rule, folder.Fullpath, includeFolder),
+		state.GetRuleExtraLabels(log.New("testing"), rule, folder.Fullpath, includeFolder),
+		nil,
 	)
 
 	alerts := make([]*amv2.PostableAlert, 0, len(transitions))
@@ -238,13 +239,13 @@ func (srv TestingApiSrv) BacktestAlertRule(c *contextmodel.ReqContext, cmd apimo
 		return ErrResp(400, nil, "Bad For interval")
 	}
 
-	intervalSeconds, err := validateInterval(srv.cfg, time.Duration(cmd.Interval))
+	intervalSeconds, err := validateInterval(time.Duration(cmd.Interval), srv.cfg.BaseInterval)
 	if err != nil {
 		return ErrResp(400, err, "")
 	}
 
 	queries := AlertQueriesFromApiAlertQueries(cmd.Data)
-	if err := srv.authz.AuthorizeAccessToRuleGroup(c.Req.Context(), c.SignedInUser, ngmodels.RulesGroup{&ngmodels.AlertRule{Data: queries}}); err != nil {
+	if err := srv.authz.AuthorizeDatasourceAccessForRule(c.Req.Context(), c.SignedInUser, &ngmodels.AlertRule{Data: queries}); err != nil {
 		return errorToResponse(err)
 	}
 

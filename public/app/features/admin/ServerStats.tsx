@@ -1,5 +1,5 @@
 import { css } from '@emotion/css';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
 import { config, GrafanaBootConfig } from '@grafana/runtime';
@@ -100,7 +100,7 @@ export const ServerStats = () => {
 };
 
 const getAnonymousStatsContent = (stats: ServerStat | null, config: GrafanaBootConfig) => {
-  if (!config.anonymousEnabled || !config.featureToggles.displayAnonymousStats || !stats?.activeDevices) {
+  if (!config.anonymousEnabled || !stats?.activeDevices) {
     return [];
   }
   if (!config.anonymousDeviceLimit) {

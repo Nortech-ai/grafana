@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/grafana/grafana-azure-sdk-go/azsettings"
+	"github.com/grafana/grafana-azure-sdk-go/v2/azsettings"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -21,7 +21,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/plugins/backendplugin/coreplugin"
-	"github.com/grafana/grafana/pkg/plugins/config"
 	pluginClient "github.com/grafana/grafana/pkg/plugins/manager/client"
 	"github.com/grafana/grafana/pkg/plugins/manager/fakes"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
@@ -31,6 +30,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/oauthtoken/oauthtokentest"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginconfig"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/plugincontext"
 	pluginSettings "github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings/service"
 	"github.com/grafana/grafana/pkg/services/quota/quotatest"
@@ -49,7 +49,6 @@ func TestCallResource(t *testing.T) {
 	cfg := setting.NewCfg()
 	cfg.StaticRootPath = staticRootPath
 	cfg.Azure = &azsettings.AzureSettings{}
-	pCfg := config.Cfg{}
 
 	coreRegistry := coreplugin.ProvideCoreRegistry(tracing.InitializeTracerForTest(), nil, &cloudwatch.CloudWatchService{}, nil, nil, nil, nil,
 		nil, nil, nil, nil, testdatasource.ProvideService(), nil, nil, nil, nil, nil, nil)
@@ -57,7 +56,7 @@ func TestCallResource(t *testing.T) {
 	testCtx := pluginsintegration.CreateIntegrationTestCtx(t, cfg, coreRegistry)
 
 	pcp := plugincontext.ProvideService(cfg, localcache.ProvideService(), testCtx.PluginStore, &datasources.FakeCacheService{},
-		&datasources.FakeDataSourceService{}, pluginSettings.ProvideService(db.InitTestDB(t), fakeSecrets.NewFakeSecretsService()), nil, &pCfg)
+		&datasources.FakeDataSourceService{}, pluginSettings.ProvideService(db.InitTestDB(t), fakeSecrets.NewFakeSecretsService()), pluginconfig.NewFakePluginRequestConfigProvider())
 
 	srv := SetupAPITestServer(t, func(hs *HTTPServer) {
 		hs.Cfg = cfg
@@ -71,7 +70,7 @@ func TestCallResource(t *testing.T) {
 	t.Run("Test successful response is received for valid request", func(t *testing.T) {
 		req := srv.NewPostRequest("/api/plugins/grafana-testdata-datasource/resources/test", strings.NewReader(`{"test": "true"}`))
 		webtest.RequestWithSignedInUser(req, &user.SignedInUser{UserID: 1, OrgID: 1, Permissions: map[int64]map[string][]string{
-			1: accesscontrol.GroupScopesByAction([]accesscontrol.Permission{
+			1: accesscontrol.GroupScopesByActionContext(context.Background(), []accesscontrol.Permission{
 				{Action: pluginaccesscontrol.ActionAppAccess, Scope: pluginaccesscontrol.ScopeProvider.GetResourceAllScope()},
 			}),
 		}})
@@ -93,7 +92,7 @@ func TestCallResource(t *testing.T) {
 	t.Run("Test successful response is received for valid request with the colon character", func(t *testing.T) {
 		req := srv.NewPostRequest("/api/plugins/grafana-testdata-datasource/resources/test-*,*:test-*/_mapping", strings.NewReader(`{"test": "true"}`))
 		webtest.RequestWithSignedInUser(req, &user.SignedInUser{UserID: 1, OrgID: 1, Permissions: map[int64]map[string][]string{
-			1: accesscontrol.GroupScopesByAction([]accesscontrol.Permission{
+			1: accesscontrol.GroupScopesByActionContext(context.Background(), []accesscontrol.Permission{
 				{Action: pluginaccesscontrol.ActionAppAccess, Scope: pluginaccesscontrol.ScopeProvider.GetResourceAllScope()},
 			}),
 		}})
@@ -147,7 +146,7 @@ func TestCallResource(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				req := srv.NewPostRequest(tc.url, strings.NewReader(`{"test": "true"}`))
 				webtest.RequestWithSignedInUser(req, &user.SignedInUser{UserID: 1, OrgID: 1, Permissions: map[int64]map[string][]string{
-					1: accesscontrol.GroupScopesByAction([]accesscontrol.Permission{
+					1: accesscontrol.GroupScopesByActionContext(context.Background(), []accesscontrol.Permission{
 						{Action: pluginaccesscontrol.ActionAppAccess, Scope: pluginaccesscontrol.ScopeProvider.GetResourceAllScope()},
 					}),
 				}})
@@ -172,7 +171,7 @@ func TestCallResource(t *testing.T) {
 			Backend: true,
 		},
 	}))
-	middlewares := pluginsintegration.CreateMiddlewares(cfg, &oauthtokentest.Service{}, tracing.InitializeTracerForTest(), &caching.OSSCachingService{}, &featuremgmt.FeatureManager{}, prometheus.DefaultRegisterer, pluginRegistry)
+	middlewares := pluginsintegration.CreateMiddlewares(cfg, &oauthtokentest.Service{}, tracing.InitializeTracerForTest(), &caching.OSSCachingService{}, featuremgmt.WithFeatures(), prometheus.DefaultRegisterer, pluginRegistry)
 	pc, err := pluginClient.NewDecorator(&fakes.FakePluginClient{
 		CallResourceHandlerFunc: backend.CallResourceHandlerFunc(func(ctx context.Context,
 			req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
@@ -193,19 +192,22 @@ func TestCallResource(t *testing.T) {
 	t.Run("Test error is properly propagated to API response", func(t *testing.T) {
 		req := srv.NewGetRequest("/api/plugins/grafana-testdata-datasource/resources/scenarios")
 		webtest.RequestWithSignedInUser(req, &user.SignedInUser{UserID: 1, OrgID: 1, Permissions: map[int64]map[string][]string{
-			1: accesscontrol.GroupScopesByAction([]accesscontrol.Permission{
+			1: accesscontrol.GroupScopesByActionContext(context.Background(), []accesscontrol.Permission{
 				{Action: pluginaccesscontrol.ActionAppAccess, Scope: pluginaccesscontrol.ScopeProvider.GetResourceAllScope()},
 			}),
 		}})
 		resp, err := srv.SendJSON(req)
 		require.NoError(t, err)
 
-		body := new(strings.Builder)
-		_, err = io.Copy(body, resp.Body)
+		bodyBytes, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 
-		expectedBody := `{ "message": "Failed to call resource", "traceID": "" }`
-		require.JSONEq(t, expectedBody, body.String())
+		var responseBody struct {
+			Message string `json:"message"`
+		}
+		err = json.Unmarshal(bodyBytes, &responseBody)
+		require.NoError(t, err)
+		require.Equal(t, responseBody.Message, "Failed to call resource")
 		require.NoError(t, resp.Body.Close())
 		require.Equal(t, 500, resp.StatusCode)
 	})

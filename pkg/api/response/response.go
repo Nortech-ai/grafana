@@ -12,10 +12,10 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"gopkg.in/yaml.v3"
 
+	"github.com/grafana/grafana/pkg/apimachinery/errutil"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/middleware/requestmeta"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
-	"github.com/grafana/grafana/pkg/util/errutil"
 )
 
 var errRequestCanceledBase = errutil.ClientClosedRequest("api.requestCanceled",
@@ -316,7 +316,7 @@ func Respond(status int, body any) *NormalResponse {
 	default:
 		var err error
 		if b, err = json.Marshal(body); err != nil {
-			return Error(500, "body json marshal", err)
+			return Error(http.StatusInternalServerError, "body json marshal", err)
 		}
 	}
 

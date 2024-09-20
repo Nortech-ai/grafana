@@ -4,16 +4,15 @@
 //     public/app/plugins/gen.go
 // Using jennies:
 //     TSTypesJenny
-//     LatestMajorsOrXJenny
-//     PluginEachMajorJenny
+//     PluginTsTypesJenny
 //
 // Run 'make gen-cue' from repository root to regenerate.
 
 import * as common from '@grafana/schema';
 
-export const pluginVersion = "10.4.0-pre";
+export const pluginVersion = "11.3.0-pre";
 
-export interface Options extends common.SingleStatBaseOptions {
+export interface Options extends common.OptionsWithLegend, common.SingleStatBaseOptions {
   displayMode: common.BarGaugeDisplayMode;
   maxVizHeight: number;
   minVizHeight: number;

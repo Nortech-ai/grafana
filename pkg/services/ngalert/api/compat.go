@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	amConfig "github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/common/model"
 
 	"github.com/grafana/grafana/pkg/services/ngalert/api/tooling/definitions"
@@ -15,43 +17,47 @@ import (
 // AlertRuleFromProvisionedAlertRule converts definitions.ProvisionedAlertRule to models.AlertRule
 func AlertRuleFromProvisionedAlertRule(a definitions.ProvisionedAlertRule) (models.AlertRule, error) {
 	return models.AlertRule{
-		ID:           a.ID,
-		UID:          a.UID,
-		OrgID:        a.OrgID,
-		NamespaceUID: a.FolderUID,
-		RuleGroup:    a.RuleGroup,
-		Title:        a.Title,
-		Condition:    a.Condition,
-		Data:         AlertQueriesFromApiAlertQueries(a.Data),
-		Updated:      a.Updated,
-		NoDataState:  models.NoDataState(a.NoDataState),          // TODO there must be a validation
-		ExecErrState: models.ExecutionErrorState(a.ExecErrState), // TODO there must be a validation
-		For:          time.Duration(a.For),
-		Annotations:  a.Annotations,
-		Labels:       a.Labels,
-		IsPaused:     a.IsPaused,
+		ID:                   a.ID,
+		UID:                  a.UID,
+		OrgID:                a.OrgID,
+		NamespaceUID:         a.FolderUID,
+		RuleGroup:            a.RuleGroup,
+		Title:                a.Title,
+		Condition:            a.Condition,
+		Data:                 AlertQueriesFromApiAlertQueries(a.Data),
+		Updated:              a.Updated,
+		NoDataState:          models.NoDataState(a.NoDataState),          // TODO there must be a validation
+		ExecErrState:         models.ExecutionErrorState(a.ExecErrState), // TODO there must be a validation
+		For:                  time.Duration(a.For),
+		Annotations:          a.Annotations,
+		Labels:               a.Labels,
+		IsPaused:             a.IsPaused,
+		NotificationSettings: NotificationSettingsFromAlertRuleNotificationSettings(a.NotificationSettings),
+		Record:               ModelRecordFromApiRecord(a.Record),
 	}, nil
 }
 
 // ProvisionedAlertRuleFromAlertRule converts models.AlertRule to definitions.ProvisionedAlertRule and sets provided provenance status
 func ProvisionedAlertRuleFromAlertRule(rule models.AlertRule, provenance models.Provenance) definitions.ProvisionedAlertRule {
 	return definitions.ProvisionedAlertRule{
-		ID:           rule.ID,
-		UID:          rule.UID,
-		OrgID:        rule.OrgID,
-		FolderUID:    rule.NamespaceUID,
-		RuleGroup:    rule.RuleGroup,
-		Title:        rule.Title,
-		For:          model.Duration(rule.For),
-		Condition:    rule.Condition,
-		Data:         ApiAlertQueriesFromAlertQueries(rule.Data),
-		Updated:      rule.Updated,
-		NoDataState:  definitions.NoDataState(rule.NoDataState),          // TODO there may be a validation
-		ExecErrState: definitions.ExecutionErrorState(rule.ExecErrState), // TODO there may be a validation
-		Annotations:  rule.Annotations,
-		Labels:       rule.Labels,
-		Provenance:   definitions.Provenance(provenance), // TODO validate enum conversion?
-		IsPaused:     rule.IsPaused,
+		ID:                   rule.ID,
+		UID:                  rule.UID,
+		OrgID:                rule.OrgID,
+		FolderUID:            rule.NamespaceUID,
+		RuleGroup:            rule.RuleGroup,
+		Title:                rule.Title,
+		For:                  model.Duration(rule.For),
+		Condition:            rule.Condition,
+		Data:                 ApiAlertQueriesFromAlertQueries(rule.Data),
+		Updated:              rule.Updated,
+		NoDataState:          definitions.NoDataState(rule.NoDataState),          // TODO there may be a validation
+		ExecErrState:         definitions.ExecutionErrorState(rule.ExecErrState), // TODO there may be a validation
+		Annotations:          rule.Annotations,
+		Labels:               rule.Labels,
+		Provenance:           definitions.Provenance(provenance), // TODO validate enum conversion?
+		IsPaused:             rule.IsPaused,
+		NotificationSettings: AlertRuleNotificationSettingsFromNotificationSettings(rule.NotificationSettings),
+		Record:               ApiRecordFromModelRecord(rule.Record),
 	}
 }
 
@@ -129,11 +135,11 @@ func ApiAlertRuleGroupFromAlertRuleGroup(d models.AlertRuleGroup) definitions.Al
 	}
 }
 
-// AlertingFileExportFromAlertRuleGroupWithFolderTitle creates an definitions.AlertingFileExport DTO from []models.AlertRuleGroupWithFolderTitle.
-func AlertingFileExportFromAlertRuleGroupWithFolderTitle(groups []models.AlertRuleGroupWithFolderTitle) (definitions.AlertingFileExport, error) {
+// AlertingFileExportFromAlertRuleGroupWithFolderFullpath creates an definitions.AlertingFileExport DTO from []models.AlertRuleGroupWithFolderTitle.
+func AlertingFileExportFromAlertRuleGroupWithFolderFullpath(groups []models.AlertRuleGroupWithFolderFullpath) (definitions.AlertingFileExport, error) {
 	f := definitions.AlertingFileExport{APIVersion: 1}
 	for _, group := range groups {
-		export, err := AlertRuleGroupExportFromAlertRuleGroupWithFolderTitle(group)
+		export, err := AlertRuleGroupExportFromAlertRuleGroupWithFolderFullpath(group)
 		if err != nil {
 			return definitions.AlertingFileExport{}, err
 		}
@@ -142,8 +148,8 @@ func AlertingFileExportFromAlertRuleGroupWithFolderTitle(groups []models.AlertRu
 	return f, nil
 }
 
-// AlertRuleGroupExportFromAlertRuleGroupWithFolderTitle creates a definitions.AlertRuleGroupExport DTO from models.AlertRuleGroup.
-func AlertRuleGroupExportFromAlertRuleGroupWithFolderTitle(d models.AlertRuleGroupWithFolderTitle) (definitions.AlertRuleGroupExport, error) {
+// AlertRuleGroupExportFromAlertRuleGroupWithFolderFullpath creates a definitions.AlertRuleGroupExport DTO from models.AlertRuleGroup.
+func AlertRuleGroupExportFromAlertRuleGroupWithFolderFullpath(d models.AlertRuleGroupWithFolderFullpath) (definitions.AlertRuleGroupExport, error) {
 	rules := make([]definitions.AlertRuleExport, 0, len(d.Rules))
 	for i := range d.Rules {
 		alert, err := AlertRuleExportFromAlertRule(d.Rules[i])
@@ -155,7 +161,7 @@ func AlertRuleGroupExportFromAlertRuleGroupWithFolderTitle(d models.AlertRuleGro
 	return definitions.AlertRuleGroupExport{
 		OrgID:           d.OrgID,
 		Name:            d.Title,
-		Folder:          d.FolderTitle,
+		Folder:          d.FolderFullpath,
 		FolderUID:       d.FolderUID,
 		Interval:        model.Duration(time.Duration(d.Interval) * time.Second),
 		IntervalSeconds: d.Interval,
@@ -174,17 +180,35 @@ func AlertRuleExportFromAlertRule(rule models.AlertRule) (definitions.AlertRuleE
 		data = append(data, query)
 	}
 
+	cPtr := &rule.Condition
+	if rule.Condition == "" {
+		cPtr = nil
+	}
+
+	noDataState := definitions.NoDataState(rule.NoDataState)
+	ndsPtr := &noDataState
+	if noDataState == "" {
+		ndsPtr = nil
+	}
+	execErrorState := definitions.ExecutionErrorState(rule.ExecErrState)
+	eesPtr := &execErrorState
+	if execErrorState == "" {
+		eesPtr = nil
+	}
+
 	result := definitions.AlertRuleExport{
-		UID:          rule.UID,
-		Title:        rule.Title,
-		For:          model.Duration(rule.For),
-		Condition:    rule.Condition,
-		Data:         data,
-		DashboardUID: rule.DashboardUID,
-		PanelID:      rule.PanelID,
-		NoDataState:  definitions.NoDataState(rule.NoDataState),
-		ExecErrState: definitions.ExecutionErrorState(rule.ExecErrState),
-		IsPaused:     rule.IsPaused,
+		UID:                  rule.UID,
+		Title:                rule.Title,
+		For:                  model.Duration(rule.For),
+		Condition:            cPtr,
+		Data:                 data,
+		DashboardUID:         rule.DashboardUID,
+		PanelID:              rule.PanelID,
+		NoDataState:          ndsPtr,
+		ExecErrState:         eesPtr,
+		IsPaused:             rule.IsPaused,
+		NotificationSettings: AlertRuleNotificationSettingsExportFromNotificationSettings(rule.NotificationSettings),
+		Record:               AlertRuleRecordExportFromRecord(rule.Record),
 	}
 	if rule.For.Seconds() > 0 {
 		result.ForString = util.Pointer(model.Duration(rule.For).String())
@@ -196,6 +220,17 @@ func AlertRuleExportFromAlertRule(rule models.AlertRule) (definitions.AlertRuleE
 		result.Labels = &rule.Labels
 	}
 	return result, nil
+}
+
+func encodeQueryModel(m map[string]any) (string, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(m)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes.TrimRight(buf.Bytes(), "\n")), nil
 }
 
 // AlertQueryExportFromAlertQuery creates a definitions.AlertQueryExport DTO from models.AlertQuery.
@@ -210,6 +245,12 @@ func AlertQueryExportFromAlertQuery(query models.AlertQuery) (definitions.AlertQ
 	if query.QueryType != "" {
 		queryType = &query.QueryType
 	}
+
+	modelString, err := encodeQueryModel(mdl)
+	if err != nil {
+		return definitions.AlertQueryExport{}, err
+	}
+
 	return definitions.AlertQueryExport{
 		RefID:     query.RefID,
 		QueryType: queryType,
@@ -219,7 +260,7 @@ func AlertQueryExportFromAlertQuery(query models.AlertQuery) (definitions.AlertQ
 		},
 		DatasourceUID: query.DatasourceUID,
 		Model:         mdl,
-		ModelString:   string(query.Model),
+		ModelString:   modelString,
 	}, nil
 }
 
@@ -372,4 +413,159 @@ func MuteTimingIntervalToMuteTimeIntervalHclExport(m definitions.MuteTimeInterva
 	}
 	err = j.Unmarshal(mdata, &result)
 	return result, err
+}
+
+// AlertRuleEditorSettingsFromEditorSettings converts models.EditorSettings to definitions.AlertRuleEditorSettings
+func AlertRuleEditorSettingsFromModelEditorSettings(es models.EditorSettings) *definitions.AlertRuleEditorSettings {
+	return &definitions.AlertRuleEditorSettings{
+		SimplifiedQueryAndExpressionsSection: es.SimplifiedQueryAndExpressionsSection,
+	}
+}
+
+// AlertRuleMetadataFromMetadata converts models.AlertRuleMetadata to definitions.AlertRuleMetadata
+func AlertRuleMetadataFromModelMetadata(es models.AlertRuleMetadata) *definitions.AlertRuleMetadata {
+	return &definitions.AlertRuleMetadata{
+		EditorSettings: *AlertRuleEditorSettingsFromModelEditorSettings(es.EditorSettings),
+	}
+}
+
+// AlertRuleNotificationSettingsFromNotificationSettings converts []models.NotificationSettings to definitions.AlertRuleNotificationSettings
+func AlertRuleNotificationSettingsFromNotificationSettings(ns []models.NotificationSettings) *definitions.AlertRuleNotificationSettings {
+	if len(ns) == 0 {
+		return nil
+	}
+	m := ns[0]
+	return &definitions.AlertRuleNotificationSettings{
+		Receiver:          m.Receiver,
+		GroupBy:           m.GroupBy,
+		GroupWait:         m.GroupWait,
+		GroupInterval:     m.GroupInterval,
+		RepeatInterval:    m.RepeatInterval,
+		MuteTimeIntervals: m.MuteTimeIntervals,
+	}
+}
+
+// AlertRuleNotificationSettingsFromNotificationSettings converts []models.NotificationSettings to definitions.AlertRuleNotificationSettingsExport
+func AlertRuleNotificationSettingsExportFromNotificationSettings(ns []models.NotificationSettings) *definitions.AlertRuleNotificationSettingsExport {
+	if len(ns) == 0 {
+		return nil
+	}
+	m := ns[0]
+
+	toStringIfNotNil := func(d *model.Duration) *string {
+		if d == nil {
+			return nil
+		}
+		s := d.String()
+		return &s
+	}
+
+	return &definitions.AlertRuleNotificationSettingsExport{
+		Receiver:          m.Receiver,
+		GroupBy:           m.GroupBy,
+		GroupWait:         toStringIfNotNil(m.GroupWait),
+		GroupInterval:     toStringIfNotNil(m.GroupInterval),
+		RepeatInterval:    toStringIfNotNil(m.RepeatInterval),
+		MuteTimeIntervals: m.MuteTimeIntervals,
+	}
+}
+
+// NotificationSettingsFromAlertRuleNotificationSettings converts definitions.AlertRuleNotificationSettings to []models.NotificationSettings
+func NotificationSettingsFromAlertRuleNotificationSettings(ns *definitions.AlertRuleNotificationSettings) []models.NotificationSettings {
+	if ns == nil {
+		return nil
+	}
+	return []models.NotificationSettings{
+		{
+			Receiver:          ns.Receiver,
+			GroupBy:           ns.GroupBy,
+			GroupWait:         ns.GroupWait,
+			GroupInterval:     ns.GroupInterval,
+			RepeatInterval:    ns.RepeatInterval,
+			MuteTimeIntervals: ns.MuteTimeIntervals,
+		},
+	}
+}
+
+func AlertRuleRecordExportFromRecord(r *models.Record) *definitions.AlertRuleRecordExport {
+	if r == nil {
+		return nil
+	}
+	return &definitions.AlertRuleRecordExport{
+		Metric: r.Metric,
+		From:   r.From,
+	}
+}
+
+func ModelRecordFromApiRecord(r *definitions.Record) *models.Record {
+	if r == nil {
+		return nil
+	}
+	return &models.Record{
+		Metric: r.Metric,
+		From:   r.From,
+	}
+}
+
+func ApiRecordFromModelRecord(r *models.Record) *definitions.Record {
+	if r == nil {
+		return nil
+	}
+	return &definitions.Record{
+		Metric: r.Metric,
+		From:   r.From,
+	}
+}
+
+func GettableGrafanaReceiverFromReceiver(r *models.Integration, provenance models.Provenance) (definitions.GettableGrafanaReceiver, error) {
+	out := definitions.GettableGrafanaReceiver{
+		UID:                   r.UID,
+		Name:                  r.Name,
+		Type:                  r.Config.Type,
+		Provenance:            definitions.Provenance(provenance),
+		DisableResolveMessage: r.DisableResolveMessage,
+		SecureFields:          r.SecureFields(),
+	}
+
+	if len(r.Settings) > 0 {
+		jsonBytes, err := json.Marshal(r.Settings)
+		if err != nil {
+			return definitions.GettableGrafanaReceiver{}, err
+		}
+		out.Settings = jsonBytes
+	}
+
+	return out, nil
+}
+
+func GettableApiReceiverFromReceiver(r *models.Receiver) (*definitions.GettableApiReceiver, error) {
+	out := definitions.GettableApiReceiver{
+		Receiver: amConfig.Receiver{
+			Name: r.Name,
+		},
+		GettableGrafanaReceivers: definitions.GettableGrafanaReceivers{
+			GrafanaManagedReceivers: make([]*definitions.GettableGrafanaReceiver, 0, len(r.Integrations)),
+		},
+	}
+
+	for _, integration := range r.Integrations {
+		gettable, err := GettableGrafanaReceiverFromReceiver(integration, r.Provenance)
+		if err != nil {
+			return nil, err
+		}
+		out.GrafanaManagedReceivers = append(out.GrafanaManagedReceivers, &gettable)
+	}
+	return &out, nil
+}
+
+func GettableApiReceiversFromReceivers(recvs []*models.Receiver) ([]*definitions.GettableApiReceiver, error) {
+	out := make([]*definitions.GettableApiReceiver, 0, len(recvs))
+	for _, r := range recvs {
+		gettables, err := GettableApiReceiverFromReceiver(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, gettables)
+	}
+	return out, nil
 }

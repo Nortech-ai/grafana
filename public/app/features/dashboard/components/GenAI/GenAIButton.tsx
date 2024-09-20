@@ -1,5 +1,6 @@
 import { css } from '@emotion/css';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import * as React from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
 import { Button, Spinner, useStyles2, Tooltip, Toggletip, Text } from '@grafana/ui';
@@ -27,6 +28,13 @@ export interface GenAIButtonProps {
   eventTrackingSrc: EventTrackingSrc;
   // Whether the button should be disabled
   disabled?: boolean;
+  /*
+    Tooltip to show when hovering over the button
+    Tooltip will be shown only before the improvement stage.
+    i.e once the button title changes to "Improve", the tooltip will not be shown because
+    toggletip will be enabled.
+  */
+  tooltip?: string;
 }
 export const STOP_GENERATION_TEXT = 'Stop generating';
 
@@ -40,72 +48,67 @@ export const GenAIButton = ({
   temperature = 1,
   eventTrackingSrc,
   disabled,
+  tooltip,
 }: GenAIButtonProps) => {
   const styles = useStyles2(getStyles);
 
-  const {
-    messages: streamMessages,
-    setMessages,
-    setStopGeneration,
-    reply,
-    value,
-    error,
-    streamStatus,
-  } = useOpenAIStream(model, temperature);
-
   const [history, setHistory] = useState<string[]>([]);
-  const [showHistory, setShowHistory] = useState(true);
+  const unshiftHistoryEntry = useCallback((historyEntry: string) => {
+    setHistory((h) => [historyEntry, ...h]);
+  }, []);
 
+  const onResponse = useCallback(
+    (reply: string) => {
+      const sanitizedReply = sanitizeReply(reply);
+      onGenerate(sanitizedReply);
+      unshiftHistoryEntry(sanitizedReply);
+    },
+    [onGenerate, unshiftHistoryEntry]
+  );
+
+  const { setMessages, stopGeneration, value, error, streamStatus } = useOpenAIStream({
+    model,
+    temperature,
+    onResponse,
+  });
+
+  const [showHistory, setShowHistory] = useState(false);
   const hasHistory = history.length > 0;
-  const isFirstHistoryEntry = streamStatus === StreamStatus.GENERATING && !hasHistory;
+  const isFirstHistoryEntry = !hasHistory;
+
+  const isGenerating = streamStatus === StreamStatus.GENERATING;
   const isButtonDisabled = disabled || (value && !value.enabled && !error);
-  const reportInteraction = (item: AutoGenerateItem) => reportAutoGenerateInteraction(eventTrackingSrc, item);
+  const reportInteraction = useCallback(
+    (item: AutoGenerateItem) => reportAutoGenerateInteraction(eventTrackingSrc, item),
+    [eventTrackingSrc]
+  );
+
+  const showTooltip = error || tooltip ? undefined : false;
+  const tooltipContent = error
+    ? 'Failed to generate content using OpenAI. Please try again or if the problem persists, contact your organization admin.'
+    : tooltip || '';
 
   const onClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (streamStatus === StreamStatus.GENERATING) {
-      setStopGeneration(true);
+      stopGeneration();
     } else {
       if (!hasHistory) {
         onClickProp?.(e);
-        setMessages(typeof messages === 'function' ? messages() : messages);
+        setMessages(getMessages());
       } else {
-        if (setShowHistory) {
-          setShowHistory(true);
-        }
+        setShowHistory(true);
       }
     }
 
     const buttonItem = error
       ? AutoGenerateItem.erroredRetryButton
-      : isFirstHistoryEntry
+      : isGenerating
         ? AutoGenerateItem.stopGenerationButton
-        : hasHistory
-          ? AutoGenerateItem.improveButton
-          : AutoGenerateItem.autoGenerateButton;
+        : isFirstHistoryEntry
+          ? AutoGenerateItem.autoGenerateButton
+          : AutoGenerateItem.improveButton;
     reportInteraction(buttonItem);
   };
-
-  const pushHistoryEntry = useCallback(
-    (historyEntry: string) => {
-      if (history.indexOf(historyEntry) === -1) {
-        setHistory([historyEntry, ...history]);
-      }
-    },
-    [history]
-  );
-
-  useEffect(() => {
-    // Todo: Consider other options for `"` sanitation
-    if (isFirstHistoryEntry && reply) {
-      onGenerate(sanitizeReply(reply));
-    }
-  }, [streamStatus, reply, onGenerate, isFirstHistoryEntry]);
-
-  useEffect(() => {
-    if (streamStatus === StreamStatus.COMPLETED) {
-      pushHistoryEntry(sanitizeReply(reply));
-    }
-  }, [history, streamStatus, reply, pushHistoryEntry]);
 
   // The button is disabled if the plugin is not installed or enabled
   if (!value?.enabled) {
@@ -119,12 +122,14 @@ export const GenAIButton = ({
   };
 
   const getIcon = () => {
-    if (isFirstHistoryEntry) {
+    if (isGenerating) {
       return undefined;
     }
-    if (error || (value && !value?.enabled)) {
+
+    if (error || (value && !value.enabled)) {
       return 'exclamation-circle';
     }
+
     return 'ai';
   };
 
@@ -135,7 +140,7 @@ export const GenAIButton = ({
       buttonText = 'Retry';
     }
 
-    if (isFirstHistoryEntry) {
+    if (isGenerating) {
       buttonText = STOP_GENERATION_TEXT;
     }
 
@@ -159,6 +164,8 @@ export const GenAIButton = ({
     </Button>
   );
 
+  const getMessages = () => (typeof messages === 'function' ? messages() : messages);
+
   const renderButtonWithToggletip = () => {
     if (hasHistory) {
       const title = <Text element="p">{toggleTipTitle}</Text>;
@@ -169,15 +176,17 @@ export const GenAIButton = ({
           content={
             <GenAIHistory
               history={history}
-              messages={streamMessages}
+              messages={getMessages()}
               onApplySuggestion={onApplySuggestion}
-              updateHistory={pushHistoryEntry}
+              updateHistory={unshiftHistoryEntry}
               eventTrackingSrc={eventTrackingSrc}
             />
           }
-          placement="bottom-start"
+          placement="left-start"
           fitContent={true}
-          show={showHistory ? undefined : false}
+          show={showHistory}
+          onClose={() => setShowHistory(false)}
+          onOpen={() => setShowHistory(true)}
         >
           {button}
         </Toggletip>
@@ -189,19 +198,14 @@ export const GenAIButton = ({
 
   return (
     <div className={styles.wrapper}>
-      {isFirstHistoryEntry && <Spinner size="sm" className={styles.spinner} />}
-      {!hasHistory && (
-        <Tooltip
-          show={error ? undefined : false}
-          interactive
-          content={
-            'Failed to generate content using OpenAI. Please try again or if the problem persist, contact your organization admin.'
-          }
-        >
+      {isGenerating && <Spinner size="sm" className={styles.spinner} />}
+      {isFirstHistoryEntry ? (
+        <Tooltip show={showTooltip} interactive content={tooltipContent}>
           {button}
         </Tooltip>
+      ) : (
+        renderButtonWithToggletip()
       )}
-      {hasHistory && renderButtonWithToggletip()}
     </div>
   );
 };

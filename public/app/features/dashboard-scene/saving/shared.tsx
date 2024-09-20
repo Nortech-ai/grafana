@@ -1,9 +1,10 @@
-import React from 'react';
+import * as React from 'react';
 
 import { selectors } from '@grafana/e2e-selectors';
-import { isFetchError } from '@grafana/runtime';
+import { config, isFetchError } from '@grafana/runtime';
 import { Dashboard } from '@grafana/schema';
 import { Alert, Box, Button, Stack } from '@grafana/ui';
+import { t, Trans } from 'app/core/internationalization';
 
 import { Diffs } from '../settings/version-history/utils';
 
@@ -15,7 +16,9 @@ export interface DashboardChangeInfo {
   hasChanges: boolean;
   hasTimeChanges: boolean;
   hasVariableValueChanges: boolean;
+  hasRefreshChange: boolean;
   isNew?: boolean;
+  hasFolderChanges?: boolean;
 }
 
 export function isVersionMismatchError(error?: Error) {
@@ -36,7 +39,21 @@ export interface NameAlreadyExistsErrorProps {
 }
 
 export function NameAlreadyExistsError({ cancelButton, saveButton }: NameAlreadyExistsErrorProps) {
-  return (
+  const isRestoreDashboardsEnabled = config.featureToggles.dashboardRestore && config.featureToggles.dashboardRestoreUI;
+  return isRestoreDashboardsEnabled ? (
+    <Alert title={t('save-dashboards.name-exists.title', 'Dashboard name already exists')} severity="error">
+      <p>
+        <Trans i18nKey="save-dashboards.name-exists.message-info">
+          A dashboard with the same name in the selected folder already exists, including recently deleted dashboards.
+        </Trans>
+      </p>
+      <p>
+        <Trans i18nKey="save-dashboards.name-exists.message-suggestion">
+          Please choose a different name or folder.
+        </Trans>
+      </p>
+    </Alert>
+  ) : (
     <Alert title="Name already exists" severity="error">
       <p>
         A dashboard with the same name in selected folder already exists. Would you still like to save this dashboard?
@@ -63,9 +80,9 @@ export function SaveButton({ overwrite, isLoading, isValid, onSave }: SaveButton
     <Button
       disabled={!isValid || isLoading}
       icon={isLoading ? 'spinner' : undefined}
-      aria-label={selectors.pages.SaveDashboardModal.save}
       onClick={() => onSave(overwrite)}
       variant={overwrite ? 'destructive' : 'primary'}
+      data-testid={selectors.components.Drawer.DashboardSaveDrawer.saveButton}
     >
       {isLoading ? 'Saving...' : overwrite ? 'Save and overwrite' : 'Save'}
     </Button>

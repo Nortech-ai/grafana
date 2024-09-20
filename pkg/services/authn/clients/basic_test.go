@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/grafana/authlib/claims"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/grafana/grafana/pkg/services/authn"
@@ -24,8 +25,8 @@ func TestBasic_Authenticate(t *testing.T) {
 		{
 			desc:             "should success when password client return identity",
 			req:              &authn.Request{HTTPRequest: &http.Request{Header: map[string][]string{authorizationHeaderName: {encodeBasicAuth("user", "password")}}}},
-			client:           authntest.FakePasswordClient{ExpectedIdentity: &authn.Identity{ID: "user:1"}},
-			expectedIdentity: &authn.Identity{ID: "user:1"},
+			client:           authntest.FakePasswordClient{ExpectedIdentity: &authn.Identity{ID: "1", Type: claims.TypeUser}},
+			expectedIdentity: &authn.Identity{ID: "1", Type: claims.TypeUser},
 		},
 		{
 			desc:        "should fail when basic auth header could not be decoded",
@@ -83,12 +84,6 @@ func TestBasic_Test(t *testing.T) {
 			desc: "should fail when authorization header is set but without basic prefix",
 			req: &authn.Request{
 				HTTPRequest: &http.Request{Header: map[string][]string{authorizationHeaderName: {"something"}}},
-			},
-		},
-		{
-			desc: "should fail when the URL ends with /oauth2/introspect",
-			req: &authn.Request{
-				HTTPRequest: &http.Request{Header: map[string][]string{authorizationHeaderName: {encodeBasicAuth("user", "password")}}, RequestURI: "/oauth2/introspect"},
 			},
 		},
 	}

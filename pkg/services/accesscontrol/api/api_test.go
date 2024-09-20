@@ -113,7 +113,11 @@ func TestAPI_getUserPermissions(t *testing.T) {
 				var output util.DynMap
 				err := json.NewDecoder(res.Body).Decode(&output)
 				require.NoError(t, err)
-				require.Equal(t, tt.expectedOutput, output)
+				for k, v := range output {
+					scopes, ok := tt.expectedOutput[k]
+					require.True(t, ok)
+					require.ElementsMatch(t, scopes, v)
+				}
 			}
 		})
 	}
@@ -139,31 +143,21 @@ func TestAccessControlAPI_searchUsersPermissions(t *testing.T) {
 			expectedCode: http.StatusBadRequest,
 		},
 		{
-			desc:         "Should reject if conflicting user filters are provided",
-			filters:      "?userLogin=admin&userId=2",
-			expectedCode: http.StatusBadRequest,
-		},
-		{
-			desc:         "Should reject if invalid userID is provided",
-			filters:      "?userId=invalid",
-			expectedCode: http.StatusBadRequest,
-		},
-		{
-			desc:           "Should work with valid filter provided",
-			filters:        "?userId=2",
+			desc:           "Should work with valid namespacedId filter provided",
+			filters:        "?namespacedId=service-account:2",
 			permissions:    map[int64][]ac.Permission{2: {{Action: "users:read", Scope: "users:*"}}},
 			expectedCode:   http.StatusOK,
 			expectedOutput: map[int64]map[string][]string{2: {"users:read": {"users:*"}}},
 		},
 		{
 			desc:           "Should reduce permissions",
-			filters:        "?userId=2",
+			filters:        "?namespacedId=service-account:2",
 			permissions:    map[int64][]ac.Permission{2: {{Action: "users:read", Scope: "users:id:1"}, {Action: "users:read", Scope: "users:*"}}},
 			expectedCode:   http.StatusOK,
 			expectedOutput: map[int64]map[string][]string{2: {"users:read": {"users:*"}}},
 		},
 		{
-			desc:    "Should work with valid action filter",
+			desc:    "Should work with valid action prefix filter",
 			filters: "?actionPrefix=users:",
 			permissions: map[int64][]ac.Permission{
 				1: {{Action: "users:write", Scope: "users:id:1"}},

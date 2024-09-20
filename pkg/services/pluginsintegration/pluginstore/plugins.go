@@ -16,15 +16,17 @@ type Plugin struct {
 	Class plugins.Class
 
 	// App fields
+	Parent          *ParentPlugin
 	IncludedInAppID string
 	DefaultNavURL   string
 	Pinned          bool
 
 	// Signature fields
-	Signature      plugins.SignatureStatus
-	SignatureType  plugins.SignatureType
-	SignatureOrg   string
-	SignatureError *plugins.SignatureError
+	Signature     plugins.SignatureStatus
+	SignatureType plugins.SignatureType
+	SignatureOrg  string
+
+	Error *plugins.Error
 
 	// SystemJS fields
 	Module  string
@@ -58,7 +60,7 @@ func ToGrafanaDTO(p *plugins.Plugin) Plugin {
 		supportsStreaming = true
 	}
 
-	return Plugin{
+	dto := Plugin{
 		fs:                p.FS,
 		supportsStreaming: supportsStreaming,
 		Class:             p.Class,
@@ -69,11 +71,20 @@ func ToGrafanaDTO(p *plugins.Plugin) Plugin {
 		Signature:         p.Signature,
 		SignatureType:     p.SignatureType,
 		SignatureOrg:      p.SignatureOrg,
-		SignatureError:    p.SignatureError,
+		Error:             p.Error,
 		Module:            p.Module,
 		BaseURL:           p.BaseURL,
 		ExternalService:   p.ExternalService,
-
-		Angular: p.Angular,
+		Angular:           p.Angular,
 	}
+
+	if p.Parent != nil {
+		dto.Parent = &ParentPlugin{ID: p.Parent.ID}
+	}
+
+	return dto
+}
+
+type ParentPlugin struct {
+	ID string
 }

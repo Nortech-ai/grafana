@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
+	"github.com/prometheus/alertmanager/pkg/labels"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,11 +51,11 @@ func TestIntegrationAlertRulePermissions(t *testing.T) {
 		AppModeProduction:     true,
 	})
 
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, p)
-	permissionsStore := resourcepermissions.NewStore(store, featuremgmt.WithFeatures())
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, p)
+	permissionsStore := resourcepermissions.NewStore(env.Cfg, env.SQLStore, featuremgmt.WithFeatures())
 
 	// Create a user to make authenticated requests
-	userID := createUser(t, store, user.CreateUserCommand{
+	userID := createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -333,11 +335,11 @@ func TestIntegrationAlertRuleNestedPermissions(t *testing.T) {
 		AppModeProduction:     true,
 	})
 
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, p)
-	permissionsStore := resourcepermissions.NewStore(store, featuremgmt.WithFeatures())
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, p)
+	permissionsStore := resourcepermissions.NewStore(env.Cfg, env.SQLStore, featuremgmt.WithFeatures())
 
 	// Create a user to make authenticated requests
-	userID := createUser(t, store, user.CreateUserCommand{
+	userID := createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -507,7 +509,7 @@ func TestIntegrationAlertRuleNestedPermissions(t *testing.T) {
 
 			require.Equal(t, "folder1", allExport.Groups[0].Folder)
 			require.Equal(t, "folder2", allExport.Groups[1].Folder)
-			require.Equal(t, "subfolder", allExport.Groups[2].Folder)
+			require.Equal(t, "folder1/subfolder", allExport.Groups[2].Folder)
 		})
 
 		t.Run("Export from one folder", func(t *testing.T) {
@@ -630,7 +632,7 @@ func TestIntegrationAlertRuleNestedPermissions(t *testing.T) {
 			require.Equal(t, http.StatusOK, status)
 			require.Len(t, export.Groups, 2)
 			require.Equal(t, "folder1", export.Groups[0].Folder)
-			require.Equal(t, "subfolder", export.Groups[1].Folder)
+			require.Equal(t, "folder1/subfolder", export.Groups[1].Folder)
 		})
 
 		t.Run("Export from one folder", func(t *testing.T) {
@@ -729,11 +731,11 @@ func TestAlertRulePostExport(t *testing.T) {
 		AppModeProduction:     true,
 	})
 
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, p)
-	permissionsStore := resourcepermissions.NewStore(store, featuremgmt.WithFeatures())
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, p)
+	permissionsStore := resourcepermissions.NewStore(env.Cfg, env.SQLStore, featuremgmt.WithFeatures())
 
 	// Create a user to make authenticated requests
-	userID := createUser(t, store, user.CreateUserCommand{
+	userID := createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -796,6 +798,115 @@ func TestAlertRulePostExport(t *testing.T) {
 	})
 }
 
+func TestIntegrationAlertRuleEditorSettings(t *testing.T) {
+	testinfra.SQLiteIntegrationTest(t)
+
+	const folderName = "folder1"
+	const groupName = "test-group"
+
+	// Setup Grafana and its Database
+	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		EnableQuota:           true,
+		DisableAnonymous:      true,
+		ViewersCanEdit:        true,
+		AppModeProduction:     true,
+	})
+
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
+	apiClient := newAlertingApiClient(grafanaListedAddr, "admin", "admin")
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
+		DefaultOrgRole: string(org.RoleAdmin),
+		Password:       "admin",
+		Login:          "admin",
+	})
+	apiClient.CreateFolder(t, folderName, folderName)
+
+	createAlertInGrafana := func(metadata *apimodels.AlertRuleMetadata) apimodels.GettableRuleGroupConfig {
+		interval, err := model.ParseDuration("1m")
+		require.NoError(t, err)
+		alertRule := apimodels.PostableExtendedRuleNode{
+			ApiRuleNode: &apimodels.ApiRuleNode{
+				For:         &interval,
+				Labels:      map[string]string{"label1": "val1"},
+				Annotations: map[string]string{"annotation1": "val1"},
+			},
+			GrafanaManagedAlert: &apimodels.PostableGrafanaRule{
+				Title:     "AlwaysFiring",
+				Condition: "A",
+				Data: []apimodels.AlertQuery{
+					{
+						RefID: "A",
+						RelativeTimeRange: apimodels.RelativeTimeRange{
+							From: apimodels.Duration(time.Duration(5) * time.Hour),
+							To:   apimodels.Duration(time.Duration(3) * time.Hour),
+						},
+						DatasourceUID: expr.DatasourceUID,
+						Model: json.RawMessage(`{
+						"type": "math",
+						"expression": "2 + 3 > 1"
+						}`),
+					},
+				},
+				Metadata: metadata,
+			},
+		}
+		rules := apimodels.PostableRuleGroupConfig{
+			Name: groupName,
+			Rules: []apimodels.PostableExtendedRuleNode{
+				alertRule,
+			},
+		}
+
+		respModel, status, _ := apiClient.PostRulesGroupWithStatus(t, folderName, &rules)
+		assert.Equal(t, http.StatusAccepted, status)
+		require.Len(t, respModel.Created, 1)
+
+		createdRuleGroup := apiClient.GetRulesGroup(t, folderName, rules.Name).GettableRuleGroupConfig
+		require.Len(t, createdRuleGroup.Rules, 1)
+
+		expectedMetadata := alertRule.GrafanaManagedAlert.Metadata
+		if metadata == nil {
+			expectedMetadata = &apimodels.AlertRuleMetadata{
+				EditorSettings: apimodels.AlertRuleEditorSettings{
+					SimplifiedQueryAndExpressionsSection: false,
+				},
+			}
+		}
+		require.Equal(t, expectedMetadata, createdRuleGroup.Rules[0].GrafanaManagedAlert.Metadata)
+
+		return createdRuleGroup
+	}
+
+	t.Run("set simplified query editor in editor settings", func(t *testing.T) {
+		metadata := &apimodels.AlertRuleMetadata{
+			EditorSettings: apimodels.AlertRuleEditorSettings{
+				SimplifiedQueryAndExpressionsSection: false,
+			},
+		}
+		createdRuleGroup := createAlertInGrafana(metadata)
+
+		rulesWithUID := convertGettableRuleGroupToPostable(createdRuleGroup)
+		rulesWithUID.Rules[0].GrafanaManagedAlert.Metadata.EditorSettings.SimplifiedQueryAndExpressionsSection = true
+
+		_, status, _ := apiClient.PostRulesGroupWithStatus(t, folderName, &rulesWithUID)
+		assert.Equal(t, http.StatusAccepted, status)
+
+		updatedRuleGroup := apiClient.GetRulesGroup(t, folderName, groupName).GettableRuleGroupConfig
+		require.Len(t, updatedRuleGroup.Rules, 1)
+		require.False(t, false, updatedRuleGroup.Rules[0].GrafanaManagedAlert.Metadata.EditorSettings.SimplifiedQueryAndExpressionsSection)
+	})
+
+	t.Run("post alert without metadata", func(t *testing.T) {
+		createAlertInGrafana(nil)
+
+		createdRuleGroup := apiClient.GetRulesGroup(t, folderName, groupName).GettableRuleGroupConfig
+		require.Len(t, createdRuleGroup.Rules, 1)
+		require.False(t, false, createdRuleGroup.Rules[0].GrafanaManagedAlert.Metadata.EditorSettings.SimplifiedQueryAndExpressionsSection)
+	})
+}
+
 func TestIntegrationAlertRuleConflictingTitle(t *testing.T) {
 	testinfra.SQLiteIntegrationTest(t)
 
@@ -809,10 +920,10 @@ func TestIntegrationAlertRuleConflictingTitle(t *testing.T) {
 		AppModeProduction:     true,
 	})
 
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
 
 	// Create user
-	createUser(t, store, user.CreateUserCommand{
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleAdmin),
 		Password:       "admin",
 		Login:          "admin",
@@ -899,10 +1010,10 @@ func TestIntegrationRulerRulesFilterByDashboard(t *testing.T) {
 		AppModeProduction:    true,
 	})
 
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
 
 	// Create a user to make authenticated requests
-	createUser(t, store, user.CreateUserCommand{
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -1019,7 +1130,12 @@ func TestIntegrationRulerRulesFilterByDashboard(t *testing.T) {
 				"namespace_uid": "nsuid",
 				"rule_group": "anotherrulegroup",
 				"no_data_state": "NoData",
-				"exec_err_state": "Alerting"
+				"exec_err_state": "Alerting",
+				"metadata": {
+					"editor_settings": {
+						"simplified_query_and_expressions_section": false
+					}
+				}
 			}
 		}, {
 			"expr": "",
@@ -1052,7 +1168,12 @@ func TestIntegrationRulerRulesFilterByDashboard(t *testing.T) {
 				"namespace_uid": "nsuid",
 				"rule_group": "anotherrulegroup",
 				"no_data_state": "Alerting",
-				"exec_err_state": "Alerting"
+				"exec_err_state": "Alerting",
+				"metadata": {
+					"editor_settings": {
+						"simplified_query_and_expressions_section": false
+					}
+				}
 			}
 		}]
 	}]
@@ -1097,7 +1218,12 @@ func TestIntegrationRulerRulesFilterByDashboard(t *testing.T) {
 				"namespace_uid": "nsuid",
 				"rule_group": "anotherrulegroup",
 				"no_data_state": "NoData",
-				"exec_err_state": "Alerting"
+				"exec_err_state": "Alerting",
+				"metadata": {
+					"editor_settings": {
+						"simplified_query_and_expressions_section": false
+					}
+				}
 			}
 		}]
 	}]
@@ -1239,10 +1365,10 @@ func TestIntegrationRuleGroupSequence(t *testing.T) {
 		DisableAnonymous:      true,
 		AppModeProduction:     true,
 	})
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
 
 	// Create a user to make authenticated requests
-	createUser(t, store, user.CreateUserCommand{
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -1336,8 +1462,8 @@ func TestIntegrationRuleCreate(t *testing.T) {
 		EnableUnifiedAlerting: true,
 		AppModeProduction:     true,
 	})
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
-	createUser(t, store, user.CreateUserCommand{
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleAdmin),
 		Password:       "admin",
 		Login:          "admin",
@@ -1409,11 +1535,11 @@ func TestIntegrationRuleUpdate(t *testing.T) {
 		DisableAnonymous:      true,
 		AppModeProduction:     true,
 	})
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
-	permissionsStore := resourcepermissions.NewStore(store, featuremgmt.WithFeatures())
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
+	permissionsStore := resourcepermissions.NewStore(env.Cfg, env.SQLStore, featuremgmt.WithFeatures())
 
 	// Create a user to make authenticated requests
-	userID := createUser(t, store, user.CreateUserCommand{
+	userID := createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -1436,7 +1562,7 @@ func TestIntegrationRuleUpdate(t *testing.T) {
 	}
 
 	// Create a user to make authenticated requests
-	createUser(t, store, user.CreateUserCommand{
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleAdmin),
 		Password:       "admin",
 		Login:          "admin",
@@ -1626,10 +1752,10 @@ func TestIntegrationRulePause(t *testing.T) {
 		DisableAnonymous:      true,
 		AppModeProduction:     true,
 	})
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, path)
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
 
 	// Create a user to make authenticated requests
-	createUser(t, store, user.CreateUserCommand{
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleEditor),
 		Password:       "password",
 		Login:          "grafana",
@@ -1756,10 +1882,10 @@ func TestIntegrationHysteresisRule(t *testing.T) {
 		EnableFeatureToggles:         []string{featuremgmt.FlagConfigurableSchedulerTick, featuremgmt.FlagRecoveryThreshold},
 	})
 
-	grafanaListedAddr, store := testinfra.StartGrafana(t, dir, p)
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, p)
 
 	// Create a user to make authenticated requests
-	createUser(t, store, user.CreateUserCommand{
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
 		DefaultOrgRole: string(org.RoleAdmin),
 		Password:       "password",
 		Login:          "grafana",
@@ -1815,4 +1941,342 @@ func TestIntegrationHysteresisRule(t *testing.T) {
 	assert.EqualValuesf(t, 5, d.Values["B"], body)
 	require.NoErrorf(t, json.Unmarshal([]byte(f.At(normalIdx).(string)), &d), body)
 	assert.EqualValuesf(t, 1, d.Values["B"], body)
+}
+
+func TestIntegrationRuleNotificationSettings(t *testing.T) {
+	testinfra.SQLiteIntegrationTest(t)
+
+	// Setup Grafana and its Database. Scheduler is set to evaluate every 1 second
+	dir, p := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
+		DisableLegacyAlerting:        true,
+		EnableUnifiedAlerting:        true,
+		DisableAnonymous:             true,
+		AppModeProduction:            true,
+		NGAlertSchedulerBaseInterval: 1 * time.Second,
+		EnableFeatureToggles:         []string{featuremgmt.FlagConfigurableSchedulerTick, featuremgmt.FlagAlertingSimplifiedRouting},
+	})
+
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, p)
+
+	// Create a user to make authenticated requests
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
+		DefaultOrgRole: string(org.RoleAdmin),
+		Password:       "password",
+		Login:          "grafana",
+	})
+
+	apiClient := newAlertingApiClient(grafanaListedAddr, "grafana", "password")
+
+	folder := "Test-Alerting"
+	apiClient.CreateFolder(t, folder, folder)
+
+	testDataRaw, err := testData.ReadFile(path.Join("test-data", "rule-notification-settings-1-post.json"))
+	require.NoError(t, err)
+
+	type testData struct {
+		RuleGroup    apimodels.PostableRuleGroupConfig
+		Receiver     apimodels.EmbeddedContactPoint
+		TimeInterval apimodels.MuteTimeInterval
+	}
+	var d testData
+	err = json.Unmarshal(testDataRaw, &d)
+	require.NoError(t, err)
+
+	apiClient.EnsureReceiver(t, d.Receiver)
+	apiClient.EnsureMuteTiming(t, d.TimeInterval)
+
+	t.Run("create should fail if receiver does not exist", func(t *testing.T) {
+		var copyD testData
+		err = json.Unmarshal(testDataRaw, &copyD)
+		group := copyD.RuleGroup
+		ns := group.Rules[0].GrafanaManagedAlert.NotificationSettings
+		ns.Receiver = "random-receiver"
+
+		_, status, body := apiClient.PostRulesGroupWithStatus(t, folder, &group)
+		require.Equalf(t, http.StatusBadRequest, status, body)
+		t.Log(body)
+	})
+
+	t.Run("create should fail if mute timing does not exist", func(t *testing.T) {
+		var copyD testData
+		err = json.Unmarshal(testDataRaw, &copyD)
+		group := copyD.RuleGroup
+		ns := group.Rules[0].GrafanaManagedAlert.NotificationSettings
+		ns.MuteTimeIntervals = []string{"random-time-interval"}
+
+		_, status, body := apiClient.PostRulesGroupWithStatus(t, folder, &group)
+		require.Equalf(t, http.StatusBadRequest, status, body)
+		t.Log(body)
+	})
+
+	t.Run("create should not fail if group_by is missing required labels but they should still be used", func(t *testing.T) {
+		var copyD testData
+		err = json.Unmarshal(testDataRaw, &copyD)
+		group := copyD.RuleGroup
+		ns := group.Rules[0].GrafanaManagedAlert.NotificationSettings
+		ns.GroupBy = []string{"label1"}
+
+		_, status, body := apiClient.PostRulesGroupWithStatus(t, folder, &group)
+		require.Equalf(t, http.StatusAccepted, status, body)
+
+		cfg, status, body := apiClient.GetAlertmanagerConfigWithStatus(t)
+		if !assert.Equalf(t, http.StatusOK, status, body) {
+			return
+		}
+
+		// Ensure that the group by contains the default required labels.
+		autogenRoute := cfg.AlertmanagerConfig.Route.Routes[0]
+		receiverRoute := autogenRoute.Routes[0]
+		ruleRoute := receiverRoute.Routes[0]
+		assert.Equal(t, []model.LabelName{ngmodels.FolderTitleLabel, model.AlertNameLabel, "label1"}, ruleRoute.GroupBy)
+
+		t.Log(body)
+	})
+
+	t.Run("create with '...' groupBy followed by config post should succeed", func(t *testing.T) {
+		var copyD testData
+		err = json.Unmarshal(testDataRaw, &copyD)
+		group := copyD.RuleGroup
+		ns := group.Rules[0].GrafanaManagedAlert.NotificationSettings
+		ns.GroupBy = []string{ngmodels.FolderTitleLabel, model.AlertNameLabel, ngmodels.GroupByAll}
+
+		_, status, body := apiClient.PostRulesGroupWithStatus(t, folder, &group)
+		require.Equalf(t, http.StatusAccepted, status, body)
+
+		// Now update the config with no changes.
+		_, status, body = apiClient.GetAlertmanagerConfigWithStatus(t)
+		if !assert.Equalf(t, http.StatusOK, status, body) {
+			return
+		}
+
+		cfg := apimodels.PostableUserConfig{}
+
+		err = json.Unmarshal([]byte(body), &cfg)
+		require.NoError(t, err)
+
+		ok, err := apiClient.PostConfiguration(t, cfg)
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+
+	t.Run("should create rule and generate route", func(t *testing.T) {
+		_, status, body := apiClient.PostRulesGroupWithStatus(t, folder, &d.RuleGroup)
+		require.Equalf(t, http.StatusAccepted, status, body)
+		notificationSettings := d.RuleGroup.Rules[0].GrafanaManagedAlert.NotificationSettings
+
+		var routeBody string
+		if !assert.EventuallyWithT(t, func(c *assert.CollectT) {
+			amConfig, status, body := apiClient.GetAlertmanagerConfigWithStatus(t)
+			routeBody = body
+			if !assert.Equalf(t, http.StatusOK, status, body) {
+				return
+			}
+			route := amConfig.AlertmanagerConfig.Route
+
+			if !assert.Len(c, route.Routes, 1) {
+				return
+			}
+
+			// Check that we are in the auto-generated root
+			autogenRoute := route.Routes[0]
+			if !assert.Len(c, autogenRoute.ObjectMatchers, 1) {
+				return
+			}
+			canContinue := assert.Equal(c, ngmodels.AutogeneratedRouteLabel, autogenRoute.ObjectMatchers[0].Name)
+			assert.Equal(c, labels.MatchEqual, autogenRoute.ObjectMatchers[0].Type)
+			assert.Equal(c, "true", autogenRoute.ObjectMatchers[0].Value)
+
+			assert.Equalf(c, route.Receiver, autogenRoute.Receiver, "Autogenerated root receiver must be the default one")
+			assert.Nil(c, autogenRoute.GroupWait)
+			assert.Nil(c, autogenRoute.GroupInterval)
+			assert.Nil(c, autogenRoute.RepeatInterval)
+			assert.Empty(c, autogenRoute.MuteTimeIntervals)
+			assert.Empty(c, autogenRoute.GroupBy)
+			if !canContinue {
+				return
+			}
+			// Now check that the second level is route for receivers
+			if !assert.NotEmpty(c, autogenRoute.Routes) {
+				return
+			}
+			// There can be many routes, for all receivers
+			idx := slices.IndexFunc(autogenRoute.Routes, func(route *apimodels.Route) bool {
+				return route.Receiver == notificationSettings.Receiver
+			})
+			if !assert.GreaterOrEqual(t, idx, 0) {
+				return
+			}
+			receiverRoute := autogenRoute.Routes[idx]
+			if !assert.Len(c, receiverRoute.ObjectMatchers, 1) {
+				return
+			}
+			canContinue = assert.Equal(c, ngmodels.AutogeneratedRouteReceiverNameLabel, receiverRoute.ObjectMatchers[0].Name)
+			assert.Equal(c, labels.MatchEqual, receiverRoute.ObjectMatchers[0].Type)
+			assert.Equal(c, notificationSettings.Receiver, receiverRoute.ObjectMatchers[0].Value)
+
+			assert.Equal(c, notificationSettings.Receiver, receiverRoute.Receiver)
+			assert.Nil(c, receiverRoute.GroupWait)
+			assert.Nil(c, receiverRoute.GroupInterval)
+			assert.Nil(c, receiverRoute.RepeatInterval)
+			assert.Empty(c, receiverRoute.MuteTimeIntervals)
+			var groupBy []string
+			for _, name := range receiverRoute.GroupBy {
+				groupBy = append(groupBy, string(name))
+			}
+			slices.Sort(groupBy)
+			assert.EqualValues(c, []string{"alertname", "grafana_folder"}, groupBy)
+			if !canContinue {
+				return
+			}
+			// Now check that we created the 3rd level for specific combination of settings
+			if !assert.Lenf(c, receiverRoute.Routes, 1, "Receiver route should contain one options route") {
+				return
+			}
+			optionsRoute := receiverRoute.Routes[0]
+			if !assert.Len(c, optionsRoute.ObjectMatchers, 1) {
+				return
+			}
+			assert.Equal(c, ngmodels.AutogeneratedRouteSettingsHashLabel, optionsRoute.ObjectMatchers[0].Name)
+			assert.Equal(c, labels.MatchEqual, optionsRoute.ObjectMatchers[0].Type)
+			assert.EqualValues(c, notificationSettings.GroupWait, optionsRoute.GroupWait)
+			assert.EqualValues(c, notificationSettings.GroupInterval, optionsRoute.GroupInterval)
+			assert.EqualValues(c, notificationSettings.RepeatInterval, optionsRoute.RepeatInterval)
+			assert.EqualValues(c, notificationSettings.MuteTimeIntervals, optionsRoute.MuteTimeIntervals)
+			groupBy = nil
+			for _, name := range optionsRoute.GroupBy {
+				groupBy = append(groupBy, string(name))
+			}
+			assert.EqualValues(c, notificationSettings.GroupBy, groupBy)
+		}, 10*time.Second, 1*time.Second) {
+			t.Logf("config: %s", routeBody)
+		}
+	})
+
+	t.Run("should correctly create alerts", func(t *testing.T) {
+		var response string
+		if !assert.EventuallyWithT(t, func(c *assert.CollectT) {
+			groups, status, body := apiClient.GetActiveAlertsWithStatus(t)
+			require.Equalf(t, http.StatusOK, status, body)
+			response = body
+			if len(groups) == 0 {
+				return
+			}
+			g := groups[0]
+			alert := g.Alerts[0]
+			assert.Contains(c, alert.Labels, ngmodels.AutogeneratedRouteLabel)
+			assert.Equal(c, "true", alert.Labels[ngmodels.AutogeneratedRouteLabel])
+			assert.Contains(c, alert.Labels, ngmodels.AutogeneratedRouteReceiverNameLabel)
+			assert.Equal(c, d.Receiver.Name, alert.Labels[ngmodels.AutogeneratedRouteReceiverNameLabel])
+			assert.Contains(c, alert.Labels, ngmodels.AutogeneratedRouteSettingsHashLabel)
+			assert.NotEmpty(c, alert.Labels[ngmodels.AutogeneratedRouteSettingsHashLabel])
+		}, 10*time.Second, 1*time.Second) {
+			t.Logf("response: %s", response)
+		}
+	})
+
+	t.Run("should update rule with empty settings and delete route", func(t *testing.T) {
+		var copyD testData
+		err = json.Unmarshal(testDataRaw, &copyD)
+		group := copyD.RuleGroup
+		notificationSettings := group.Rules[0].GrafanaManagedAlert.NotificationSettings
+		group.Rules[0].GrafanaManagedAlert.NotificationSettings = nil
+
+		_, status, body := apiClient.PostRulesGroupWithStatus(t, folder, &group)
+		require.Equalf(t, http.StatusAccepted, status, body)
+
+		var routeBody string
+		if !assert.EventuallyWithT(t, func(c *assert.CollectT) {
+			amConfig, status, body := apiClient.GetAlertmanagerConfigWithStatus(t)
+			routeBody = body
+			if !assert.Equalf(t, http.StatusOK, status, body) {
+				return
+			}
+			route := amConfig.AlertmanagerConfig.Route
+
+			if !assert.Len(c, route.Routes, 1) {
+				return
+			}
+			// Check that we are in the auto-generated root
+			autogenRoute := route.Routes[0]
+			if !assert.Len(c, autogenRoute.ObjectMatchers, 1) {
+				return
+			}
+			if !assert.Equal(c, ngmodels.AutogeneratedRouteLabel, autogenRoute.ObjectMatchers[0].Name) {
+				return
+			}
+			// Now check that the second level is route for receivers
+			if !assert.NotEmpty(c, autogenRoute.Routes) {
+				return
+			}
+			// There can be many routes, for all receivers
+			idx := slices.IndexFunc(autogenRoute.Routes, func(route *apimodels.Route) bool {
+				return route.Receiver == notificationSettings.Receiver
+			})
+			if !assert.GreaterOrEqual(t, idx, 0) {
+				return
+			}
+			receiverRoute := autogenRoute.Routes[idx]
+			if !assert.Empty(c, receiverRoute.Routes) {
+				return
+			}
+		}, 10*time.Second, 1*time.Second) {
+			t.Logf("config: %s", routeBody)
+		}
+	})
+}
+
+func TestIntegrationRuleUpdateAllDatabases(t *testing.T) {
+	// Setup Grafana and its Database
+	dir, path := testinfra.CreateGrafDir(t, testinfra.GrafanaOpts{
+		DisableLegacyAlerting: true,
+		EnableUnifiedAlerting: true,
+		DisableAnonymous:      true,
+		AppModeProduction:     true,
+	})
+	grafanaListedAddr, env := testinfra.StartGrafanaEnv(t, dir, path)
+
+	// Create a user to make authenticated requests
+	createUser(t, env.SQLStore, env.Cfg, user.CreateUserCommand{
+		DefaultOrgRole: string(org.RoleAdmin),
+		Password:       "admin",
+		Login:          "admin",
+	})
+
+	client := newAlertingApiClient(grafanaListedAddr, "admin", "admin")
+
+	folderUID := util.GenerateShortUID()
+	client.CreateFolder(t, folderUID, "folder1")
+
+	t.Run("group renamed followed by delete for case-only changes should not delete both groups", func(t *testing.T) { // Regression test.
+		group := generateAlertRuleGroup(3, alertRuleGen())
+		groupName := group.Name
+
+		_, status, body := client.PostRulesGroupWithStatus(t, folderUID, &group)
+		require.Equalf(t, http.StatusAccepted, status, "failed to post rule group. Response: %s", body)
+		getGroup := client.GetRulesGroup(t, folderUID, group.Name)
+		require.Lenf(t, getGroup.Rules, 3, "expected 3 rules in group")
+		require.Equal(t, groupName, getGroup.Rules[0].GrafanaManagedAlert.RuleGroup)
+
+		group = convertGettableRuleGroupToPostable(getGroup.GettableRuleGroupConfig)
+		newGroup := strings.ToUpper(group.Name)
+		group.Name = newGroup
+		_, status, body = client.PostRulesGroupWithStatus(t, folderUID, &group)
+		require.Equalf(t, http.StatusAccepted, status, "failed to post rule group. Response: %s", body)
+
+		getGroup = client.GetRulesGroup(t, folderUID, group.Name)
+		require.Lenf(t, getGroup.Rules, 3, "expected 3 rules in group")
+		require.Equal(t, newGroup, getGroup.Rules[0].GrafanaManagedAlert.RuleGroup)
+
+		status, body = client.DeleteRulesGroup(t, folderUID, groupName)
+		require.Equalf(t, http.StatusAccepted, status, "failed to post noop rule group. Response: %s", body)
+
+		// Old group is gone.
+		getGroup = client.GetRulesGroup(t, folderUID, groupName)
+		require.Lenf(t, getGroup.Rules, 0, "expected no rules")
+
+		// New group still exists.
+		getGroup = client.GetRulesGroup(t, folderUID, newGroup)
+		require.Lenf(t, getGroup.Rules, 3, "expected 3 rules in group")
+		require.Equal(t, newGroup, getGroup.Rules[0].GrafanaManagedAlert.RuleGroup)
+	})
 }

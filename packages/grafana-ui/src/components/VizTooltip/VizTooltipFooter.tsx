@@ -1,39 +1,51 @@
 import { css } from '@emotion/css';
-import React from 'react';
 
-import { Field, GrafanaTheme2, LinkModel } from '@grafana/data';
+import { ActionModel, Field, GrafanaTheme2, LinkModel } from '@grafana/data';
 
-import { Button, ButtonProps, DataLinkButton, HorizontalGroup } from '..';
+import { Button, ButtonProps, DataLinkButton, Stack } from '..';
 import { useStyles2 } from '../../themes';
+import { ActionButton } from '../Actions/ActionButton';
 
-interface Props {
+interface VizTooltipFooterProps {
   dataLinks: Array<LinkModel<Field>>;
+  actions?: Array<ActionModel<Field>>;
   annotate?: () => void;
 }
 
 export const ADD_ANNOTATION_ID = 'add-annotation-button';
 
-export const VizTooltipFooter = ({ dataLinks, annotate }: Props) => {
-  const styles = useStyles2(getStyles);
-
-  const renderDataLinks = () => {
-    const buttonProps: ButtonProps = {
-      variant: 'secondary',
-    };
-
-    return (
-      <HorizontalGroup>
-        {dataLinks.map((link, i) => (
-          <DataLinkButton key={i} link={link} buttonProps={buttonProps} />
-        ))}
-      </HorizontalGroup>
-    );
+const renderDataLinks = (dataLinks: LinkModel[]) => {
+  const buttonProps: ButtonProps = {
+    variant: 'secondary',
   };
 
   return (
+    <Stack direction="column" justifyContent="flex-start">
+      {dataLinks.map((link, i) => (
+        <DataLinkButton key={i} link={link} buttonProps={buttonProps} />
+      ))}
+    </Stack>
+  );
+};
+
+const renderActions = (actions: ActionModel[]) => {
+  return (
+    <Stack direction="column" justifyContent="flex-start">
+      {actions.map((action, i) => (
+        <ActionButton key={i} action={action} variant="secondary" />
+      ))}
+    </Stack>
+  );
+};
+
+export const VizTooltipFooter = ({ dataLinks, actions, annotate }: VizTooltipFooterProps) => {
+  const styles = useStyles2(getStyles);
+
+  return (
     <div className={styles.wrapper}>
-      {dataLinks.length > 0 && <div className={styles.dataLinks}>{renderDataLinks()}</div>}
-      {annotate && (
+      {dataLinks.length > 0 && <div className={styles.dataLinks}>{renderDataLinks(dataLinks)}</div>}
+      {actions && actions.length > 0 && <div className={styles.dataLinks}>{renderActions(actions)}</div>}
+      {annotate != null && (
         <div className={styles.addAnnotations}>
           <Button icon="comment-alt" variant="secondary" size="sm" id={ADD_ANNOTATION_ID} onClick={annotate}>
             Add annotation
@@ -52,10 +64,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     padding: theme.spacing(0),
   }),
   dataLinks: css({
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    whiteSpace: 'nowrap',
-    maskImage: 'linear-gradient(90deg, rgba(0, 0, 0, 1) 80%, transparent)',
     borderTop: `1px solid ${theme.colors.border.medium}`,
     padding: theme.spacing(1),
   }),

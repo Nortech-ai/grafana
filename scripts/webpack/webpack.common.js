@@ -1,4 +1,3 @@
-const CopyWebpackPlugin = require('copy-webpack-plugin');
 const path = require('path');
 const webpack = require('webpack');
 
@@ -8,6 +7,7 @@ module.exports = {
   target: 'web',
   entry: {
     app: './public/app/index.ts',
+    swagger: './public/swagger/index.tsx',
   },
   output: {
     clean: true,
@@ -52,11 +52,13 @@ module.exports = {
       string_decoder: false,
     },
   },
-  ignoreWarnings: [/export .* was not found in/],
-  stats: {
-    children: false,
-    source: false,
-  },
+  ignoreWarnings: [
+    /export .* was not found in/,
+    {
+      module: /@kusto\/language-service\/bridge\.min\.js$/,
+      message: /^Critical dependency: the request of a dependency is an expression$/,
+    },
+  ],
   plugins: [
     new webpack.NormalModuleReplacementPlugin(/^@grafana\/schema\/dist\/esm\/(.*)$/, (resource) => {
       resource.request = resource.request.replace('@grafana/schema/dist/esm', '@grafana/schema/src');
@@ -64,25 +66,6 @@ module.exports = {
     new CorsWorkerPlugin(),
     new webpack.ProvidePlugin({
       Buffer: ['buffer', 'Buffer'],
-    }),
-    new CopyWebpackPlugin({
-      patterns: [
-        {
-          context: path.join(require.resolve('monaco-editor/package.json'), '../min/vs/'),
-          from: '**/*',
-          to: '../lib/monaco/min/vs/', // inside the public/build folder
-          globOptions: {
-            ignore: [
-              '**/*.map', // debug files
-            ],
-          },
-        },
-        {
-          context: path.join(require.resolve('@kusto/monaco-kusto/package.json'), '../release/min'),
-          from: '**/*',
-          to: '../lib/monaco/min/vs/language/kusto/',
-        },
-      ],
     }),
   ],
   module: {
@@ -124,7 +107,7 @@ module.exports = {
       },
       // for pre-caching SVGs as part of the JS bundles
       {
-        test: /(unicons|mono|custom)[\\/].*\.svg$/,
+        test: /(unicons|mono|custom|solid)[\\/].*\.svg$/,
         type: 'asset/source',
       },
       {

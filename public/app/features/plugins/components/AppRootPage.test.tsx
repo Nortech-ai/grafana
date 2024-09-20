@@ -1,19 +1,18 @@
-import { act, render, screen } from '@testing-library/react';
-import React, { Component } from 'react';
-import { Provider } from 'react-redux';
+import { act, screen } from '@testing-library/react';
+import { Component } from 'react';
 import { Route, Router } from 'react-router-dom';
-import { getGrafanaContextMock } from 'test/mocks/getGrafanaContextMock';
+import { render } from 'test/test-utils';
 
 import { AppPlugin, PluginType, AppRootProps, NavModelItem, PluginIncludeType, OrgRole } from '@grafana/data';
 import { getMockPlugin } from '@grafana/data/test/__mocks__/pluginMocks';
 import { locationService, setEchoSrv } from '@grafana/runtime';
-import { GrafanaContext } from 'app/core/context/GrafanaContext';
 import { GrafanaRoute } from 'app/core/navigation/GrafanaRoute';
 import { RouteDescriptor } from 'app/core/navigation/types';
 import { contextSrv } from 'app/core/services/context_srv';
 import { Echo } from 'app/core/services/echo/Echo';
-import { configureStore } from 'app/store/configureStore';
 
+import { ExtensionRegistriesProvider } from '../extensions/ExtensionRegistriesContext';
+import { setupPluginExtensionRegistries } from '../extensions/registry/setup';
 import { getPluginSettings } from '../pluginSettings';
 import { importAppPlugin } from '../plugin_loader';
 
@@ -24,6 +23,25 @@ jest.mock('../pluginSettings', () => ({
 }));
 jest.mock('../plugin_loader', () => ({
   importAppPlugin: jest.fn(),
+}));
+
+jest.mock('@grafana/runtime', () => ({
+  ...jest.requireActual('@grafana/runtime'),
+  config: {
+    featureToggles: {
+      accessControlOnCall: true,
+    },
+    theme2: {
+      breakpoints: {
+        values: {
+          sm: 576,
+          md: 768,
+          lg: 992,
+          xl: 1200,
+        },
+      },
+    },
+  },
 }));
 
 const importAppPluginMock = importAppPlugin as jest.Mock<
@@ -69,8 +87,8 @@ async function renderUnderRouter(page = '') {
 
   appPluginNavItem.parentItem = appsSection;
 
+  const registries = setupPluginExtensionRegistries();
   const pagePath = page ? `/${page}` : '';
-  const store = configureStore();
   const route = {
     component: () => <AppRootPage pluginId="my-awesome-plugin" pluginNavSection={appsSection} />,
   } as unknown as RouteDescriptor;
@@ -81,11 +99,9 @@ async function renderUnderRouter(page = '') {
 
   render(
     <Router history={locationService.getHistory()}>
-      <Provider store={store}>
-        <GrafanaContext.Provider value={getGrafanaContextMock()}>
-          <Route path={`/a/:pluginId${pagePath}`} exact render={(props) => <GrafanaRoute {...props} route={route} />} />
-        </GrafanaContext.Provider>
-      </Provider>
+      <ExtensionRegistriesProvider registries={registries}>
+        <Route path={`/a/:pluginId${pagePath}`} exact render={(props) => <GrafanaRoute {...props} route={route} />} />
+      </ExtensionRegistriesProvider>
     </Router>
   );
 }
@@ -175,6 +191,19 @@ describe('AppRootPage', () => {
             name: 'Awesome page 2',
             path: '/a/my-awesome-plugin/page-without-role',
           },
+          {
+            type: PluginIncludeType.page,
+            name: 'Awesome page 3',
+            path: '/a/my-awesome-plugin/page-with-action-no-role',
+            action: 'grafana-awesomeapp.user-settings:read',
+          },
+          {
+            type: PluginIncludeType.page,
+            name: 'Awesome page 4',
+            path: '/a/my-awesome-plugin/page-with-action-and-role',
+            role: 'Viewer',
+            action: 'grafana-awesomeapp.user-settings:read',
+          },
         ],
       });
 
@@ -194,12 +223,57 @@ describe('AppRootPage', () => {
       expect(await screen.findByText('Access denied')).toBeVisible();
     });
 
+    it('a None role user should only have access to pages with actions defined or undefined', async () => {
+      contextSrv.user.orgRole = OrgRole.None;
+
+      // has access to a plugin entry page by default
+      await renderUnderRouter('');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // does not have access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // does not have access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // has access to a page without roles
+      await renderUnderRouter('page-without-role');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to Viewer page
+      await renderUnderRouter('viewer-page');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      contextSrv.user.permissions = {
+        'grafana-awesomeapp.user-settings:read': true,
+      };
+
+      // has access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('my great component')).toBeVisible();
+    });
+
     it('a Viewer should only have access to pages with "Viewer" roles', async () => {
       contextSrv.user.orgRole = OrgRole.Viewer;
+      contextSrv.user.permissions = {};
 
       // Viewer has access to a plugin entry page by default
       await renderUnderRouter('');
       expect(await screen.findByText('my great component')).toBeVisible();
+
+      // Viewer does not have access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // Viewer does not have access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
 
       // Viewer has access to a page without roles
       await renderUnderRouter('page-without-role');
@@ -221,34 +295,96 @@ describe('AppRootPage', () => {
     it('an Editor should have access to pages with both "Viewer" and "Editor" roles', async () => {
       contextSrv.user.orgRole = OrgRole.Editor;
       contextSrv.isEditor = true;
+      contextSrv.user.permissions = {};
 
-      // Viewer has access to a plugin entry page by default
+      // does not have access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // does not have access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // has access to a plugin entry page by default
       await renderUnderRouter('');
       expect(await screen.findByText('my great component')).toBeVisible();
 
-      // Editor has access to a page without roles
+      // has access to a page without roles
       await renderUnderRouter('page-without-role');
       expect(await screen.findByText('my great component')).toBeVisible();
 
-      // Editor has access to Viewer page
+      // has access to Viewer page
       await renderUnderRouter('viewer-page');
       expect(await screen.findByText('my great component')).toBeVisible();
 
-      // Editor has access to Editor page
+      // has access to Editor page
       await renderUnderRouter('editor-page');
       expect(await screen.findByText('my great component')).toBeVisible();
 
-      // Editor does not have access to a Admin page
+      // does not have access to a Admin page
       await renderUnderRouter('admin-page');
       expect(await screen.findByText('Access denied')).toBeVisible();
+
+      contextSrv.user.permissions = {
+        'grafana-awesomeapp.user-settings:read': true,
+      };
+
+      // has access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('my great component')).toBeVisible();
     });
 
-    it('a Grafana Admin should be able to see any page', async () => {
+    it('an Admin should have access to pages with both "Viewer" and "Editor" roles', async () => {
+      contextSrv.user.orgRole = OrgRole.Admin;
+      contextSrv.user.permissions = {};
+
+      // does not have access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // does not have access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // has access to a plugin entry page by default
+      await renderUnderRouter('');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to a page without roles
+      await renderUnderRouter('page-without-role');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to Viewer page
+      await renderUnderRouter('viewer-page');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to Editor page
+      await renderUnderRouter('editor-page');
+      expect(await screen.findByText('my great component')).toBeVisible();
+
+      // has access to a Admin page
+      await renderUnderRouter('admin-page');
+      expect(await screen.findByText('my great component')).toBeVisible();
+    });
+
+    it('a Grafana Admin should be able to see any page without action specifier', async () => {
       contextSrv.isGrafanaAdmin = true;
 
       // Viewer has access to a plugin entry page
       await renderUnderRouter('');
       expect(await screen.findByText('my great component')).toBeVisible();
+
+      // Viewer does not have access to a page with an action but no role
+      await renderUnderRouter('page-with-action-no-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
+
+      // Viewer does not have access to a page with an action and role
+      await renderUnderRouter('page-with-action-and-role');
+      expect(await screen.findByText('Access denied')).toBeVisible();
 
       // Admin has access to a page without roles
       await renderUnderRouter('page-without-role');

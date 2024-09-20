@@ -1,35 +1,16 @@
 import { render as RTLRender } from '@testing-library/react';
-import React from 'react';
+import * as React from 'react';
 import { TestProvider } from 'test/helpers/TestProvider';
 
-import {
-  behaviors,
-  SceneGridLayout,
-  SceneGridItem,
-  SceneRefreshPicker,
-  SceneTimeRange,
-  SceneTimePicker,
-} from '@grafana/scenes';
+import { SceneGridLayout, SceneTimeRange, behaviors } from '@grafana/scenes';
 import { DashboardCursorSync } from '@grafana/schema';
 
 import { DashboardControls } from '../scene/DashboardControls';
-import { DashboardLinksControls } from '../scene/DashboardLinksControls';
 import { DashboardScene } from '../scene/DashboardScene';
 import { activateFullSceneTree } from '../utils/test-utils';
 
 import { DashboardLinksEditView } from './DashboardLinksEditView';
 import { NEW_LINK } from './links/utils';
-
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
-  useLocation: jest.fn().mockReturnValue({
-    pathname: '/d/dash-1/settings/links',
-    search: '',
-    hash: '',
-    state: null,
-    key: '5nvxpbdafa',
-  }),
-}));
 
 function render(component: React.ReactNode) {
   return RTLRender(<TestProvider>{component}</TestProvider>);
@@ -225,34 +206,14 @@ async function buildTestScene() {
   const dashboard = new DashboardScene({
     $timeRange: new SceneTimeRange({}),
     $behaviors: [new behaviors.CursorSync({ sync: DashboardCursorSync.Off })],
-    controls: [
-      new DashboardControls({
-        variableControls: [],
-        linkControls: new DashboardLinksControls({}),
-        timeControls: [
-          new SceneTimePicker({}),
-          new SceneRefreshPicker({
-            intervals: ['1s'],
-          }),
-        ],
-      }),
-    ],
+    controls: new DashboardControls({}),
     title: 'hello',
     uid: 'dash-1',
     meta: {
       canEdit: true,
     },
     body: new SceneGridLayout({
-      children: [
-        new SceneGridItem({
-          key: 'griditem-1',
-          x: 0,
-          y: 0,
-          width: 10,
-          height: 12,
-          body: undefined,
-        }),
-      ],
+      children: [],
     }),
     editview: settings,
   });

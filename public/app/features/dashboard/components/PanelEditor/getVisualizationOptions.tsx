@@ -1,5 +1,4 @@
 import { get as lodashGet } from 'lodash';
-import React from 'react';
 
 import {
   EventBus,
@@ -11,11 +10,14 @@ import {
 } from '@grafana/data';
 import { PanelOptionsSupplier } from '@grafana/data/src/panel/PanelPlugin';
 import {
-  isNestedPanelOptions,
   NestedValueAccess,
   PanelOptionsEditorBuilder,
+  isNestedPanelOptions,
 } from '@grafana/data/src/utils/OptionsUIBuilders';
 import { VizPanel } from '@grafana/scenes';
+import { Input } from '@grafana/ui';
+import { LibraryVizPanelInfo } from 'app/features/dashboard-scene/panel-edit/LibraryVizPanelInfo';
+import { LibraryPanelBehavior } from 'app/features/dashboard-scene/scene/LibraryPanelBehavior';
 import { getDataLinksVariableSuggestions } from 'app/features/panel/panellinks/link_srv';
 
 import { OptionsPaneCategoryDescriptor } from './OptionsPaneCategoryDescriptor';
@@ -133,7 +135,7 @@ export function getVisualizationOptions(props: OptionPaneRenderProps): OptionsPa
         description: fieldOption.description,
         overrides: getOptionOverrides(fieldOption, currentFieldConfig, data?.series),
         render: function renderEditor() {
-          const onChange = (v: any) => {
+          const onChange = (v: unknown) => {
             onFieldConfigsChange(
               updateDefaultFieldConfigValue(currentFieldConfig, fieldOption.path, v, fieldOption.isCustom)
             );
@@ -146,6 +148,43 @@ export function getVisualizationOptions(props: OptionPaneRenderProps): OptionsPa
   }
 
   return Object.values(categoryIndex);
+}
+
+export function getLibraryVizPanelOptionsCategory(libraryPanel: LibraryPanelBehavior): OptionsPaneCategoryDescriptor {
+  const descriptor = new OptionsPaneCategoryDescriptor({
+    title: 'Library panel options',
+    id: 'Library panel options',
+    isOpenDefault: true,
+  });
+
+  descriptor
+    .addItem(
+      new OptionsPaneItemDescriptor({
+        title: 'Name',
+        value: libraryPanel,
+        popularRank: 1,
+        render: function renderName() {
+          return (
+            <Input
+              id="LibraryPanelFrameName"
+              data-testid="library panel name input"
+              defaultValue={libraryPanel.state.name}
+              onBlur={(e) => libraryPanel.setState({ name: e.currentTarget.value })}
+            />
+          );
+        },
+      })
+    )
+    .addItem(
+      new OptionsPaneItemDescriptor({
+        title: 'Information',
+        render: function renderLibraryPanelInformation() {
+          return <LibraryVizPanelInfo libraryPanel={libraryPanel} />;
+        },
+      })
+    );
+
+  return descriptor;
 }
 
 export interface OptionPaneRenderProps2 {
@@ -229,7 +268,8 @@ export function getVisualizationOptions2(props: OptionPaneRenderProps2): Options
         render: function renderEditor() {
           const onChange = (v: unknown) => {
             panel.onFieldConfigChange(
-              updateDefaultFieldConfigValue(currentFieldConfig, fieldOption.path, v, fieldOption.isCustom)
+              updateDefaultFieldConfigValue(currentFieldConfig, fieldOption.path, v, fieldOption.isCustom),
+              true
             );
           };
 

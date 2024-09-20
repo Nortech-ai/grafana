@@ -1,5 +1,4 @@
 import { render, screen } from '@testing-library/react';
-import React from 'react';
 
 import config from 'app/core/config';
 
@@ -51,7 +50,6 @@ describe('ServerStats', () => {
   });
 
   it('Should render page with anonymous stats', async () => {
-    config.featureToggles.displayAnonymousStats = true;
     config.anonymousEnabled = true;
     config.anonymousDeviceLimit = 10;
     render(<ServerStats />);

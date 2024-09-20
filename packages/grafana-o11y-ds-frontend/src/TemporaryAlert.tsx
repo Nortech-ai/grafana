@@ -1,5 +1,5 @@
 import { css } from '@emotion/css';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, AlertVariant, useTheme2 } from '@grafana/ui';
@@ -58,5 +58,17 @@ export const TemporaryAlert = (props: AlertProps) => {
     }
   }, [props.severity, props.text]);
 
-  return <>{visible && <Alert className={style} elevated={true} title={props.text} severity={props.severity} />}</>;
+  return (
+    <>
+      {visible && (
+        <Alert
+          className={style}
+          elevated={true}
+          onRemove={() => setVisible(false)}
+          severity={props.severity}
+          title={props.text}
+        />
+      )}
+    </>
+  );
 };

@@ -144,7 +144,7 @@ export class DatasourceSrv implements DataSourceService {
     return this.loadDatasource(nameOrUid);
   }
 
-  async loadDatasource(key: string): Promise<DataSourceApi<any, any>> {
+  async loadDatasource(key: string): Promise<DataSourceApi> {
     if (this.datasources[key]) {
       return Promise.resolve(this.datasources[key]);
     }
@@ -164,7 +164,7 @@ export class DatasourceSrv implements DataSourceService {
 
       // If there is only one constructor argument it is instanceSettings
       const useAngular = dsPlugin.DataSourceClass.length !== 1;
-      let instance: DataSourceApi<any, any>;
+      let instance: DataSourceApi;
 
       if (useAngular) {
         instance = getLegacyAngularInjector().instantiate(dsPlugin.DataSourceClass, {
@@ -184,7 +184,7 @@ export class DatasourceSrv implements DataSourceService {
         anyInstance.type = instanceSettings.type;
         anyInstance.meta = instanceSettings.meta;
         anyInstance.uid = instanceSettings.uid;
-        (instance as any).getRef = DataSourceApi.prototype.getRef;
+        anyInstance.getRef = DataSourceApi.prototype.getRef;
       }
 
       // store in instance cache
@@ -251,8 +251,10 @@ export class DatasourceSrv implements DataSourceService {
           continue;
         }
         let dsValue = variable.current.value === 'default' ? this.defaultName : variable.current.value;
-        if (Array.isArray(dsValue) && dsValue.length === 1) {
-          // Support for multi-value variables with only one selected datasource
+        // Support for multi-value DataSource (ds) variables
+        if (Array.isArray(dsValue)) {
+          // If the ds variable have multiple selected datasources
+          // We will use the first one
           dsValue = dsValue[0];
         }
         const dsSettings =

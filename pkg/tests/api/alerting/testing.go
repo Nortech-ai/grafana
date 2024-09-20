@@ -35,7 +35,6 @@ const defaultAlertmanagerConfigJSON = `
 			"receiver": "grafana-default-email",
 			"group_by": ["grafana_folder", "alertname"]
 		},
-		"templates": null,
 		"receivers": [{
 			"name": "grafana-default-email",
 			"grafana_managed_receiver_configs": [{
@@ -226,18 +225,31 @@ func convertGettableGrafanaRuleToPostable(gettable *apimodels.GettableGrafanaRul
 		return nil
 	}
 	return &apimodels.PostableGrafanaRule{
-		Title:        gettable.Title,
-		Condition:    gettable.Condition,
-		Data:         gettable.Data,
-		UID:          gettable.UID,
-		NoDataState:  gettable.NoDataState,
-		ExecErrState: gettable.ExecErrState,
-		IsPaused:     &gettable.IsPaused,
+		Title:                gettable.Title,
+		Condition:            gettable.Condition,
+		Data:                 gettable.Data,
+		UID:                  gettable.UID,
+		NoDataState:          gettable.NoDataState,
+		ExecErrState:         gettable.ExecErrState,
+		IsPaused:             &gettable.IsPaused,
+		NotificationSettings: gettable.NotificationSettings,
+		Metadata:             gettable.Metadata,
 	}
 }
 
 type apiClient struct {
 	url string
+}
+
+type LegacyApiClient struct {
+	apiClient
+}
+
+func NewAlertingLegacyAPIClient(host, user, pass string) LegacyApiClient {
+	cli := newAlertingApiClient(host, user, pass)
+	return LegacyApiClient{
+		apiClient: cli,
+	}
 }
 
 func newAlertingApiClient(host, user, pass string) apiClient {
@@ -453,39 +465,50 @@ func (a apiClient) DeleteRulesGroup(t *testing.T, folder string, group string) (
 	return resp.StatusCode, string(b)
 }
 
-func (a apiClient) PostSilence(t *testing.T, s apimodels.PostableSilence) (string, error) {
+func (a apiClient) PostSilence(t *testing.T, s apimodels.PostableSilence) (apimodels.PostSilencesOKBody, int, string) {
 	t.Helper()
 
 	b, err := json.Marshal(s)
 	require.NoError(t, err)
 
-	u := fmt.Sprintf("%s/api/alertmanager/grafana/api/v2/silences", a.url)
-	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(b))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/alertmanager/grafana/api/v2/silences", a.url), bytes.NewReader(b))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
+	return sendRequest[apimodels.PostSilencesOKBody](t, req, http.StatusAccepted)
+}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+func (a apiClient) GetSilence(t *testing.T, id string) (apimodels.GettableSilence, int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/alertmanager/grafana/api/v2/silence/%s", a.url, id), nil)
 	require.NoError(t, err)
-	require.NotNil(t, resp)
+	return sendRequest[apimodels.GettableSilence](t, req, http.StatusOK)
+}
 
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	b, err = io.ReadAll(resp.Body)
+func (a apiClient) GetSilences(t *testing.T, filters ...string) (apimodels.GettableSilences, int, string) {
+	t.Helper()
+
+	u, err := url.Parse(fmt.Sprintf("%s/api/alertmanager/grafana/api/v2/silences", a.url))
 	require.NoError(t, err)
-
-	data := struct {
-		SilenceID string `json:"silenceID"`
-		Message   string `json:"message"`
-	}{}
-	require.NoError(t, json.Unmarshal(b, &data))
-
-	if resp.StatusCode == http.StatusAccepted {
-		return data.SilenceID, nil
+	if len(filters) > 0 {
+		u.RawQuery = url.Values{"filter": filters}.Encode()
 	}
 
-	return "", errors.New(data.Message)
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	require.NoError(t, err)
+
+	return sendRequest[apimodels.GettableSilences](t, req, http.StatusOK)
+}
+
+func (a apiClient) DeleteSilence(t *testing.T, id string) (any, int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/alertmanager/grafana/api/v2/silence/%s", a.url, id), nil)
+	require.NoError(t, err)
+
+	type dynamic struct {
+		Message string `json:"message"`
+	}
+
+	return sendRequest[dynamic](t, req, http.StatusOK)
 }
 
 func (a apiClient) GetRulesGroup(t *testing.T, folder string, group string) apimodels.RuleGroupConfigResponse {
@@ -711,6 +734,13 @@ func (a apiClient) CreateMuteTimingWithStatus(t *testing.T, interval apimodels.M
 	return sendRequest[apimodels.MuteTimeInterval](t, req, http.StatusCreated)
 }
 
+func (a apiClient) EnsureMuteTiming(t *testing.T, interval apimodels.MuteTimeInterval) {
+	t.Helper()
+
+	_, status, body := a.CreateMuteTimingWithStatus(t, interval)
+	require.Equalf(t, http.StatusCreated, status, body)
+}
+
 func (a apiClient) UpdateMuteTimingWithStatus(t *testing.T, interval apimodels.MuteTimeInterval) (apimodels.MuteTimeInterval, int, string) {
 	t.Helper()
 
@@ -754,7 +784,15 @@ func (a apiClient) GetRouteWithStatus(t *testing.T) (apimodels.Route, int, strin
 	return sendRequest[apimodels.Route](t, req, http.StatusOK)
 }
 
-func (a apiClient) UpdateRouteWithStatus(t *testing.T, route apimodels.Route) (int, string) {
+func (a apiClient) GetRoute(t *testing.T) apimodels.Route {
+	t.Helper()
+
+	route, status, data := a.GetRouteWithStatus(t)
+	requireStatusCode(t, http.StatusOK, status, data)
+	return route
+}
+
+func (a apiClient) UpdateRouteWithStatus(t *testing.T, route apimodels.Route, noProvenance bool) (int, string) {
 	t.Helper()
 
 	buf := bytes.Buffer{}
@@ -764,6 +802,9 @@ func (a apiClient) UpdateRouteWithStatus(t *testing.T, route apimodels.Route) (i
 
 	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/api/v1/provisioning/policies", a.url), &buf)
 	req.Header.Add("Content-Type", "application/json")
+	if noProvenance {
+		req.Header.Add("X-Disable-Provenance", "true")
+	}
 	require.NoError(t, err)
 
 	client := &http.Client{}
@@ -776,6 +817,12 @@ func (a apiClient) UpdateRouteWithStatus(t *testing.T, route apimodels.Route) (i
 	require.NoError(t, err)
 
 	return resp.StatusCode, string(body)
+}
+
+func (a apiClient) UpdateRoute(t *testing.T, route apimodels.Route, noProvenance bool) {
+	t.Helper()
+	status, data := a.UpdateRouteWithStatus(t, route, noProvenance)
+	requireStatusCode(t, http.StatusAccepted, status, data)
 }
 
 func (a apiClient) GetRuleHistoryWithStatus(t *testing.T, ruleUID string) (data.Frame, int, string) {
@@ -810,7 +857,83 @@ func (a apiClient) GetTimeIntervalByNameWithStatus(t *testing.T, name string) (a
 	return sendRequest[apimodels.GettableTimeIntervals](t, req, http.StatusOK)
 }
 
+func (a apiClient) CreateReceiverWithStatus(t *testing.T, receiver apimodels.EmbeddedContactPoint) (apimodels.EmbeddedContactPoint, int, string) {
+	t.Helper()
+
+	buf := bytes.Buffer{}
+	enc := json.NewEncoder(&buf)
+	err := enc.Encode(receiver)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/provisioning/contact-points", a.url), &buf)
+	req.Header.Add("Content-Type", "application/json")
+	require.NoError(t, err)
+
+	return sendRequest[apimodels.EmbeddedContactPoint](t, req, http.StatusAccepted)
+}
+
+func (a apiClient) EnsureReceiver(t *testing.T, receiver apimodels.EmbeddedContactPoint) {
+	t.Helper()
+
+	_, status, body := a.CreateReceiverWithStatus(t, receiver)
+	require.Equalf(t, http.StatusAccepted, status, body)
+}
+
+func (a apiClient) ExportReceiver(t *testing.T, name string, format string, decrypt bool) string {
+	t.Helper()
+	u, err := url.Parse(fmt.Sprintf("%s/api/v1/provisioning/contact-points/export", a.url))
+	require.NoError(t, err)
+	q := url.Values{}
+	q.Set("name", name)
+	q.Set("format", format)
+	q.Set("decrypt", fmt.Sprintf("%v", decrypt))
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	require.NoError(t, err)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	requireStatusCode(t, http.StatusOK, resp.StatusCode, string(body))
+	return string(body)
+}
+
+func (a apiClient) ExportReceiverTyped(t *testing.T, name string, decrypt bool) apimodels.ContactPointExport {
+	t.Helper()
+
+	response := a.ExportReceiver(t, name, "json", decrypt)
+
+	var export apimodels.AlertingFileExport
+	require.NoError(t, json.Unmarshal([]byte(response), &export))
+	require.Len(t, export.ContactPoints, 1)
+	return export.ContactPoints[0]
+}
+
+func (a apiClient) GetAlertmanagerConfigWithStatus(t *testing.T) (apimodels.GettableUserConfig, int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/alertmanager/grafana/config/api/v1/alerts", a.url), nil)
+	require.NoError(t, err)
+
+	return sendRequest[apimodels.GettableUserConfig](t, req, http.StatusOK)
+}
+
+func (a apiClient) GetActiveAlertsWithStatus(t *testing.T) (apimodels.AlertGroups, int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/alertmanager/grafana/api/v2/alerts/groups", a.url), nil)
+	require.NoError(t, err)
+	return sendRequest[apimodels.AlertGroups](t, req, http.StatusOK)
+}
+
 func sendRequest[T any](t *testing.T, req *http.Request, successStatusCode int) (T, int, string) {
+	t.Helper()
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	require.NoError(t, err)
@@ -832,5 +955,6 @@ func sendRequest[T any](t *testing.T, req *http.Request, successStatusCode int) 
 }
 
 func requireStatusCode(t *testing.T, expected, actual int, response string) {
+	t.Helper()
 	require.Equalf(t, expected, actual, "Unexpected status. Response: %s", response)
 }

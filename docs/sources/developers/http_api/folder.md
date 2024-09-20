@@ -143,11 +143,11 @@ Creates a new folder.
 
 See note in the [introduction]({{< ref "#folder-api" >}}) for an explanation.
 
-`folders:create` allows creating folders in the root level. To create a subfolder, `folders:write` scoped to the parent folder is required in addition to `folders:create`.
+`folders:create` allows creating folders and subfolders. If granted with scope `folders:uid:general`, allows creating root level folders. Otherwise, allows creating subfolders under the specified folders.
 
 | Action           | Scope       |
 | ---------------- | ----------- |
-| `folders:create` | n/a         |
+| `folders:create` | `folders:*` |
 | `folders:write`  | `folders:*` |
 
 **Example Request**:
@@ -160,7 +160,8 @@ Authorization: Bearer eyJrIjoiT0tTcG1pUlY2RnVKZTFVaDFsNFZXdE9ZWmNrMkZYbk
 
 {
   "uid": "nErXDvCkzz",
-  "title": "Department ABC"
+  "title": "Department ABC",
+  "parentUid": "fgnj5e52gel76g"
 }
 ```
 
@@ -168,6 +169,7 @@ JSON Body schema:
 
 - **uid** – Optional [unique identifier]({{< ref "#identifier-id-vs-unique-identifier-uid" >}}).
 - **title** – The title of the folder.
+- **parentUid** - Optional field, the unique identifier of the parent folder under which the folder should be created. Requires nested folders to be enabled.
 
 **Example Response**:
 
@@ -409,14 +411,14 @@ See note in the [introduction]({{< ref "#folder-api" >}}) for an explanation.
 
 If moving the folder under another folder:
 
-| Action          | Scope                                  |
-| --------------- | -------------------------------------- |
-| `folders:write` | `folders:uid:<destination folder UID>` |
+| Action           | Scope                                                 |
+| ---------------- | ----------------------------------------------------- |
+| `folders:create` | `folders:uid:<destination folder UID>`<br>`folders:*` |
 
 If moving the folder under root:
 | Action | Scope |
 | -------------- | ------------- |
-| `folders:create` | `folders:*` |
+| `folders:create` | `folders:uid:general`<br>`folders:*` |
 
 JSON body schema:
 

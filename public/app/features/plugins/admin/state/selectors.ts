@@ -1,8 +1,9 @@
 import { createSelector } from '@reduxjs/toolkit';
 
 import { PluginError, PluginType, unEscapeStringFromRegex } from '@grafana/data';
+import { reportInteraction } from '@grafana/runtime';
 
-import { filterByKeyword } from '../helpers';
+import { filterByKeyword, isPluginUpdateable } from '../helpers';
 import { RequestStatus, PluginCatalogStoreState } from '../types';
 
 import { pluginsAdapter } from './reducer';
@@ -10,8 +11,6 @@ import { pluginsAdapter } from './reducer';
 export const selectRoot = (state: PluginCatalogStoreState) => state.plugins;
 
 export const selectItems = createSelector(selectRoot, ({ items }) => items);
-
-export const selectDisplayMode = createSelector(selectRoot, ({ settings }) => settings.displayMode);
 
 export const { selectAll, selectById } = pluginsAdapter.getSelectors(selectItems);
 
@@ -28,6 +27,9 @@ export type PluginFilters = {
 
   // (Optional, only applied if set)
   isEnterprise?: boolean;
+
+  // (Optional, only applied if set)
+  hasUpdate?: boolean;
 };
 
 export const selectPlugins = (filters: PluginFilters) =>
@@ -35,6 +37,9 @@ export const selectPlugins = (filters: PluginFilters) =>
     const keyword = filters.keyword ? unEscapeStringFromRegex(filters.keyword.toLowerCase()) : '';
     const filteredPluginIds = keyword !== '' ? filterByKeyword(plugins, keyword) : null;
 
+    if (keyword) {
+      reportInteraction('plugins_search', { resultsCount: filteredPluginIds?.length });
+    }
     return plugins.filter((plugin) => {
       if (keyword && filteredPluginIds == null) {
         return false;
@@ -53,6 +58,10 @@ export const selectPlugins = (filters: PluginFilters) =>
       }
 
       if (filters.isEnterprise !== undefined && plugin.isEnterprise !== filters.isEnterprise) {
+        return false;
+      }
+
+      if (filters.hasUpdate !== undefined && (plugin.hasUpdate !== filters.hasUpdate || !isPluginUpdateable(plugin))) {
         return false;
       }
 

@@ -1,9 +1,12 @@
 import { ComponentType } from 'react';
 import { Observable } from 'rxjs';
 
+import { DataSourceRef } from '@grafana/schema';
+
 import { makeClassES5Compatible } from '../utils/makeClassES5Compatible';
 
 import { ScopedVars } from './ScopedVars';
+import { WithAccessControlMetadata } from './accesscontrol';
 import { AnnotationEvent, AnnotationQuery, AnnotationSupport } from './annotations';
 import { CoreApp } from './app';
 import { KeyValue, LoadingState, TableData, TimeSeries } from './data';
@@ -11,10 +14,10 @@ import { DataFrame, DataFrameDTO } from './dataFrame';
 import { PanelData } from './panel';
 import { GrafanaPlugin, PluginMeta } from './plugin';
 import { DataQuery } from './query';
+import { Scope } from './scopes';
+import { AdHocVariableFilter } from './templateVars';
 import { RawTimeRange, TimeRange } from './time';
 import { CustomVariableSupport, DataSourceVariableSupport, StandardVariableSupport } from './variables';
-
-import { AdHocVariableFilter, DataSourceRef, WithAccessControlMetadata } from '.';
 
 export interface DataSourcePluginOptionsEditorProps<
   JSONData extends DataSourceJsonData = DataSourceJsonData,
@@ -139,6 +142,7 @@ export interface DataSourcePluginMeta<T extends KeyValue = {}> extends PluginMet
   unlicensed?: boolean;
   backend?: boolean;
   isBackend?: boolean;
+  multiValueFilterOperators?: boolean;
 }
 
 interface PluginMetaQueryOptions {
@@ -190,9 +194,6 @@ type VariableSupport<TQuery extends DataQuery, TOptions extends DataSourceJsonDa
 
 /**
  * The main data source abstraction interface, represents an instance of a data source
- *
- * Although this is a class, datasource implementations do not *yet* need to extend it.
- * As such, we can not yet add functions with default implementations.
  */
 abstract class DataSourceApi<
   TQuery extends DataQuery = DataQuery,
@@ -220,6 +221,11 @@ abstract class DataSourceApi<
   readonly uid: string;
 
   /**
+   *  Set in constructor
+   */
+  readonly apiVersion?: string;
+
+  /**
    *  min interval range
    */
   interval?: string;
@@ -231,6 +237,7 @@ abstract class DataSourceApi<
     this.meta = instanceSettings.meta;
     this.cachingConfig = instanceSettings.cachingConfig;
     this.uid = instanceSettings.uid;
+    this.apiVersion = instanceSettings.apiVersion;
   }
 
   /**
@@ -263,11 +270,12 @@ abstract class DataSourceApi<
   abstract testDatasource(): Promise<TestDataSourceResponse>;
 
   /**
-   * This function is not called automatically unless running within the DataSourceWithBackend
-   *
-   * @deprecated
+   * Optionally, you can implement this method to prevent certain queries from being executed.
+   * Return false to prevent the query from being executed.
    */
-  filterQuery?(query: TQuery): boolean;
+  filterQuery?(query: TQuery): boolean {
+    return true;
+  }
 
   /**
    *  Get hints for query improvements
@@ -287,12 +295,12 @@ abstract class DataSourceApi<
   /**
    * Get tag keys for adhoc filters
    */
-  getTagKeys?(options?: DataSourceGetTagKeysOptions<TQuery>): Promise<MetricFindValue[]>;
+  getTagKeys?(options?: DataSourceGetTagKeysOptions<TQuery>): Promise<GetTagResponse> | Promise<MetricFindValue[]>;
 
   /**
    * Get tag values for adhoc filters
    */
-  getTagValues?(options: DataSourceGetTagValuesOptions): Promise<MetricFindValue[]>;
+  getTagValues?(options: DataSourceGetTagValuesOptions<TQuery>): Promise<GetTagResponse> | Promise<MetricFindValue[]>;
 
   /**
    * Set after constructor call, as the data source instance is the most common thing to pass around
@@ -323,7 +331,11 @@ abstract class DataSourceApi<
 
   /** Get an identifier object for this datasource instance */
   getRef(): DataSourceRef {
-    return { type: this.type, uid: this.uid };
+    const ref: DataSourceRef = { type: this.type, uid: this.uid };
+    if (this.apiVersion) {
+      ref.apiVersion = this.apiVersion;
+    }
+    return ref;
   }
 
   /**
@@ -377,12 +389,13 @@ export interface DataSourceGetTagKeysOptions<TQuery extends DataQuery = DataQuer
    */
   timeRange?: TimeRange;
   queries?: TQuery[];
+  scopes?: Scope[] | undefined;
 }
 
 /**
  * Options argument to DataSourceAPI.getTagValues
  */
-export interface DataSourceGetTagValuesOptions {
+export interface DataSourceGetTagValuesOptions<TQuery extends DataQuery = DataQuery> {
   key: string;
   /**
    * The other existing filters or base filters. New in v10.3
@@ -392,6 +405,8 @@ export interface DataSourceGetTagValuesOptions {
    * Context time range. New in v10.3
    */
   timeRange?: TimeRange;
+  queries?: TQuery[];
+  scopes?: Scope[] | undefined;
 }
 
 export interface MetadataInspectorProps<
@@ -429,10 +444,6 @@ export interface QueryEditorProps<
    */
   data?: PanelData;
   range?: TimeRange;
-  /**
-   * @deprecated This is not used anymore and will be removed in a future release.
-   */
-  exploreId?: string;
   history?: Array<HistoryItem<TQuery>>;
   queries?: DataQuery[];
   app?: CoreApp;
@@ -444,15 +455,6 @@ export enum ExploreMode {
   Metrics = 'Metrics',
   Tracing = 'Tracing',
 }
-
-/**
- * @deprecated use QueryEditorProps instead
- */
-export type ExploreQueryFieldProps<
-  DSType extends DataSourceApi<TQuery, TOptions>,
-  TQuery extends DataQuery = DataQuery,
-  TOptions extends DataSourceJsonData = DataSourceJsonData,
-> = QueryEditorProps<DSType, TQuery, TOptions>;
 
 export interface QueryEditorHelpProps<TQuery extends DataQuery = DataQuery> {
   datasource: DataSourceApi<TQuery>;
@@ -555,8 +557,9 @@ export interface DataQueryRequest<TQuery extends DataQuery = DataQuery> {
   rangeRaw?: RawTimeRange;
   timeInfo?: string; // The query time description (blue text in the upper right)
   panelId?: number;
-  panelPluginType?: string;
+  panelPluginId?: string;
   dashboardUID?: string;
+  headers?: Record<string, string>;
 
   /** Filters to dynamically apply to all queries */
   filters?: AdHocVariableFilter[];
@@ -574,6 +577,8 @@ export interface DataQueryRequest<TQuery extends DataQuery = DataQuery> {
 
   // Used to correlate multiple related requests
   queryGroupId?: string;
+
+  scopes?: Scope[] | undefined;
 }
 
 export interface DataQueryTimings {
@@ -599,7 +604,7 @@ export interface QueryFixAction {
    */
   options?: KeyValue<string>;
   /**
-   * An optional single row data frame containing the row that triggered the the QueryFixAction.
+   * An optional single row data frame containing the row that triggered the QueryFixAction.
    */
   frame?: DataFrame;
 }
@@ -613,6 +618,7 @@ export interface QueryHint {
 export interface MetricFindValue {
   text: string;
   value?: string | number;
+  group?: string;
   expandable?: boolean;
 }
 
@@ -655,6 +661,7 @@ export interface DataSourceSettings<T extends DataSourceJsonData = DataSourceJso
   readOnly: boolean;
   withCredentials: boolean;
   version?: number;
+  apiVersion?: string;
 }
 
 /**
@@ -667,6 +674,7 @@ export interface DataSourceInstanceSettings<T extends DataSourceJsonData = DataS
   uid: string;
   type: string;
   name: string;
+  apiVersion?: string;
   meta: DataSourcePluginMeta;
   cachingConfig?: PluginQueryCachingConfig;
   readOnly: boolean;
@@ -720,6 +728,11 @@ export interface AnnotationQueryRequest<MoreOptions = {}> {
 export interface HistoryItem<TQuery extends DataQuery = DataQuery> {
   ts: number;
   query: TQuery;
+}
+
+export interface GetTagResponse {
+  data: MetricFindValue[];
+  error?: DataQueryError;
 }
 
 abstract class LanguageProvider {

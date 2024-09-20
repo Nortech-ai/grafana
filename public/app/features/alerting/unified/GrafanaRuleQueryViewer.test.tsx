@@ -1,14 +1,15 @@
-import { render } from '@testing-library/react';
-import { noop } from 'lodash';
-import React from 'react';
+import { render, waitFor, screen } from 'test/test-utils';
 
 import { DataSourceRef } from '@grafana/schema';
 import { AlertQuery } from 'app/types/unified-alerting-dto';
 
 import { GrafanaRuleQueryViewer } from './GrafanaRuleQueryViewer';
+import { mockCombinedRule } from './mocks';
 
 describe('GrafanaRuleQueryViewer', () => {
-  it('renders without crashing', () => {
+  it('renders without crashing', async () => {
+    const rule = mockCombinedRule();
+
     const getDataSourceQuery = (refId: string) => {
       const query: AlertQuery = {
         refId: refId,
@@ -71,10 +72,9 @@ describe('GrafanaRuleQueryViewer', () => {
       getExpression('C', { type: '' }),
       getExpression('D', { type: '' }),
     ];
-    const { getByTestId } = render(
-      <GrafanaRuleQueryViewer queries={[...queries, ...expressions]} condition="A" onTimeRangeChange={noop} />
-    );
-    expect(getByTestId('queries-container')).toHaveStyle('flex-wrap: wrap');
-    expect(getByTestId('expressions-container')).toHaveStyle('flex-wrap: wrap');
+    render(<GrafanaRuleQueryViewer queries={[...queries, ...expressions]} condition="A" rule={rule} />);
+
+    await waitFor(() => expect(screen.getByTestId('queries-container')).toHaveStyle('flex-wrap: wrap'));
+    expect(screen.getByTestId('expressions-container')).toHaveStyle('flex-wrap: wrap');
   });
 });

@@ -3,18 +3,16 @@ import { useEffect, useMemo } from 'react';
 import { PluginError, PluginType } from '@grafana/data';
 import { useDispatch, useSelector } from 'app/types';
 
-import { sortPlugins, Sorters } from '../helpers';
-import { CatalogPlugin, PluginListDisplayMode } from '../types';
+import { sortPlugins, Sorters, isPluginUpdateable } from '../helpers';
+import { CatalogPlugin } from '../types';
 
 import { fetchAll, fetchDetails, fetchRemotePlugins, install, uninstall, fetchAllLocal, unsetInstall } from './actions';
-import { setDisplayMode } from './reducer';
 import {
   selectPlugins,
   selectById,
   selectIsRequestPending,
   selectRequestError,
   selectIsRequestNotFetched,
-  selectDisplayMode,
   selectPluginErrors,
   type PluginFilters,
 } from './selectors';
@@ -33,6 +31,16 @@ export const useGetAll = (filters: PluginFilters, sortBy: Sorters = Sorters.name
     isLoading,
     error,
     plugins: sortedPlugins,
+  };
+};
+
+export const useGetUpdatable = () => {
+  const { isLoading } = useFetchStatus();
+  const { plugins: installed } = useGetAll({ isInstalled: true });
+  const updatablePlugins = installed.filter(isPluginUpdateable);
+  return {
+    isLoading,
+    updatablePlugins,
   };
 };
 
@@ -84,7 +92,10 @@ export const useLocalFetchStatus = () => {
 };
 
 export const useFetchStatus = () => {
-  const isLoading = useSelector(selectIsRequestPending(fetchAll.typePrefix));
+  const isAllLoading = useSelector(selectIsRequestPending(fetchAll.typePrefix));
+  const isLocalLoading = useSelector(selectIsRequestPending('plugins/fetchLocal'));
+  const isRemoteLoading = useSelector(selectIsRequestPending('plugins/fetchRemote'));
+  const isLoading = isAllLoading || isLocalLoading || isRemoteLoading;
   const error = useSelector(selectRequestError(fetchAll.typePrefix));
 
   return { isLoading, error };
@@ -146,14 +157,4 @@ export const useFetchDetailsLazy = () => {
   const dispatch = useDispatch();
 
   return (id: string) => dispatch(fetchDetails(id));
-};
-
-export const useDisplayMode = () => {
-  const dispatch = useDispatch();
-  const displayMode = useSelector(selectDisplayMode);
-
-  return {
-    displayMode,
-    setDisplayMode: (v: PluginListDisplayMode) => dispatch(setDisplayMode(v)),
-  };
 };

@@ -21,9 +21,86 @@ weight: 100
 
 # Node graph
 
-Node graphs can visualize directed graphs or networks. They use a directed force layout to effectively position the nodes, so they can display complex infrastructure maps, hierarchies, or execution diagrams.
+Node graphs are useful when you need to visualize elements that are related to each other. This is done by displaying circles&mdash;or _nodes_&mdash;for each element you want to visualize, connected by lines&mdash;or _edges_. The visualization uses a directed force layout that positions the nodes into a network of connected circles.
 
-![Node graph visualization](/static/img/docs/node-graph/node-graph-8-0.png 'Node graph')
+Node graphs display useful information about each node, as well as the relationships between them, allowing you to visualize complex infrastructure maps, hierarchies, or execution diagrams.
+
+![Node graph visualization](/media/docs/grafana/data-sources/tempo/query-editor/tempo-ds-query-node-graph.png 'Node graph')
+
+The appearance of nodes and edges can also be customized in several ways including color, borders, and line style.
+
+You can use a node graph visualization if you need to show:
+
+- Solution topologies
+- Networks
+- Infrastructure
+- Organizational charts
+- Critical path diagrams
+- Family trees
+- Mind maps
+
+## Configure a node graph visualization
+
+The following video provides beginner steps for creating node panel visualizations. You'll learn the data requirements and caveats, special customizations, and much more:
+
+{{< youtube id="VrvsMkRwoKw" >}}
+
+{{< docs/play title="Node graph panel" url="https://play.grafana.org/d/bdodfbi3d57uoe/" >}}
+
+## Supported data formats
+
+To create node graphs, you need two datasets: one containing the records for the displayed elements (nodes) and one dataset containing the records for the connections between those elements (edges).
+
+### Nodes dataset
+
+The nodes dataset must contain one alphanumeric ID field that gives each element a unique identifier. The visualization also accepts other options fields for titles, subtitles, main and secondary stats, arc information for how much of the circle border to paint, details, colors, icons, node size, and indicators for element highlighting. For more information and naming conventions for these fields, refer to the [Nodes data frame structure](#nodes-data-frame-structure) section.
+
+#### Example
+
+| id    | title | subtitle | mainstat | secondarystat | color | icon | highlighted |
+| ----- | ----- | -------- | -------- | ------------- | ----- | ---- | ----------- |
+| node1 | PC    | Windows  | AMD      | 16gbRAM       | blue  |      | true        |
+| node2 | PC    | Linux    | Intel    | 32gbRAM       | green | eye  | false       |
+| node3 | Mac   | MacOS    | M3       | 16gbRAM       | gray  | apps | false       |
+| node4 | Alone | SoLonely | JustHere | NotConnected  | red   |      | false       |
+
+If the icon field contains a value, it’s displayed instead of the title and subtitle. For a list of of available icons, refer to [Icons Overview](https://developers.grafana.com/ui/latest/index.html?path=/story/docs-overview-icon--icons-overview).
+
+### Edges dataset
+
+Similar to the nodes dataset, the edges dataset needs one unique ID field for each relationship, followed by two fields containing the source and the target nodes of the edge; that is, the nodes the edge connects. Other optional fields are main and secondary stats, context menu elements, line thickness, highlight indications, line colors, and configurations to turn the connection into a dashed line. For more information and naming conventions for these fields, refer to the [Edges data frame structure](#edges-data-frame-structure) section.
+
+#### Example
+
+| id    | source | target | mainstat | seconddarystat | thickness | highlighted | color  |
+| ----- | ------ | ------ | -------- | -------------- | --------- | ----------- | ------ |
+| edge1 | node1  | node2  | TheMain  | TheSub         | 3         | true        | cyan   |
+| edge2 | node3  | node2  | Main2    | Sub2           | 1         | false       | orange |
+
+If a node lacks edge connections, it’s displayed on its own outside of the network.
+
+## Panel options
+
+{{< docs/shared lookup="visualizations/panel-options.md" source="grafana" version="<GRAFANA_VERSION>" >}}
+
+## Nodes options
+
+The **Nodes** options section provides configurations for node behaviors.
+
+- **Main stat unit** - Choose which unit the main stat displays in the graph's nodes.
+- **Secondary stat unit** - Choose which unit the secondary stat displays in the graph's nodes.
+- **Arc sections** - Configure which fields define the size of the colored circle around the node and select a color for each. You can add multiple fields.
+
+{{< admonition type="note" >}}
+Defining arc sections overrides the automatic detection of `arc__*` and `color` fields described in the **Optional fields** section of [Nodes data frame structure](#nodes-data-frame-structure).
+{{< /admonition >}}
+
+## Edges options
+
+The **Edges** options section provides configurations for node edges behaviors.
+
+- **Main stat unit** - Choose which unit the main stat displays in the graph's edges.
+- **Secondary stat unit** - Choose which unit the secondary stat displays in the graph's edges.
 
 ## Data requirements
 
@@ -44,9 +121,11 @@ Node graphs can show only 1,500 nodes. If this limit is crossed a warning will b
 
 Usually, nodes show two statistical values inside the node and two identifiers just below the node, usually name and type. Nodes can also show another set of values as a color circle around the node, with sections of different color represents different values that should add up to 1.
 
-For example, you can have the percentage of errors represented by a red portion of the circle. Additional details can be displayed in a context menu which is displayed when you click on the node. There also can be additional links in the context menu that can target either other parts of Grafana or any external link.
+For example, you can have the percentage of errors represented by a red portion of the circle.
+Additional details can be displayed in a context menu which is displayed when you click on the node.
+There also can be additional links in the context menu that can target either other parts of Grafana or any external link.
 
-![Node graph navigation](/static/img/docs/node-graph/node-graph-navigation-7-4.gif 'Node graph navigation')
+![Node graph navigation](/media/docs/grafana/data-sources/tempo/query-editor/node-graph-navigation.png 'Node graph navigation')
 
 ### Edges
 
@@ -76,7 +155,9 @@ The number of nodes shown at a given time is limited to maintain a reasonable vi
 
 You can switch to the grid view to have a better overview of the most interesting nodes in the graph. Grid view shows nodes in a grid without edges and can be sorted by stats shown inside the node or by stats represented by the a colored border of the nodes.
 
-![Node graph grid](/static/img/docs/node-graph/node-graph-grid-8-0.png 'Node graph grid')
+<!-- Screenshot from v11.2 -->
+
+![Node graph grid](/media/docs/grafana/data-sources/tempo/query-editor/node-graph-grid-view.png 'Node graph grid')
 
 To sort the nodes, click on the stats inside the legend. The marker next to the stat name shows which stat is currently used for sorting and sorting direction.
 
@@ -104,13 +185,21 @@ Required fields:
 
 Optional fields:
 
-| Field name    | Type          | Description                                                                                                                                                                                         |
-| ------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| mainstat      | string/number | First stat shown in the overlay when hovering over the edge. It can be a string showing the value as is or it can be a number. If it is a number, any unit associated with that field is also shown |
-| secondarystat | string/number | Same as mainStat, but shown right under it.                                                                                                                                                         |
-| detail\_\_\*  | string/number | Any field prefixed with `detail__` will be shown in the header of context menu when clicked on the edge. Use `config.displayName` for more human readable label.                                    |
-| thickness     | number        | The thickness of the edge. Default: `1`                                                                                                                                                             |
-| highlighted   | boolean       | Sets whether the edge should be highlighted. Useful, for example, to represent a specific path in the graph by highlighting several nodes and edges. Default: `false`                               |
+| Field name      | Type          | Description                                                                                                                                                                                                                                                               |
+| --------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| mainstat        | string/number | First stat shown in the overlay when hovering over the edge. It can be a string showing the value as is or it can be a number. If it is a number, any unit associated with that field is also shown                                                                       |
+| secondarystat   | string/number | Same as mainStat, but shown right under it.                                                                                                                                                                                                                               |
+| detail\_\_\*    | string/number | Any field prefixed with `detail__` will be shown in the header of context menu when clicked on the edge. Use `config.displayName` for more human readable label.                                                                                                          |
+| thickness       | number        | The thickness of the edge. Default: `1`                                                                                                                                                                                                                                   |
+| highlighted     | boolean       | Sets whether the edge should be highlighted. Useful, for example, to represent a specific path in the graph by highlighting several nodes and edges. Default: `false`                                                                                                     |
+| color           | string        | Sets the default color of the edge. It can be an acceptable HTML color string. Default: `#999`                                                                                                                                                                            |
+| strokeDasharray | string        | Sets the pattern of dashes and gaps used to render the edge. If unset, a solid line is used as edge. For more information and examples, refer to the [`stroke-dasharray` MDN documentation](https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-dasharray). |
+
+{{< admonition type="caution" >}}
+Starting with 10.5, `highlighted` is deprecated.
+It will be removed in a future release.
+Use `color` to indicate a highlighted edge state instead.
+{{< /admonition >}}
 
 ### Nodes data frame structure
 

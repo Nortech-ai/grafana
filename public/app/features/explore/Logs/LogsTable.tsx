@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 
 import {
@@ -89,7 +89,7 @@ export function LogsTable(props: Props) {
         };
 
         // If it's a string, then try to guess for a better type for numeric support in viz
-        field.type = field.type === FieldType.string ? guessFieldTypeForField(field) ?? FieldType.string : field.type;
+        field.type = field.type === FieldType.string ? (guessFieldTypeForField(field) ?? FieldType.string) : field.type;
       }
 
       return frameWithOverrides;
@@ -105,7 +105,7 @@ export function LogsTable(props: Props) {
       }
 
       // create extract JSON transformation for every field that is `json.RawMessage`
-      const transformations: Array<DataTransformerConfig | CustomTransformOperator> = extractFields(dataFrame);
+      const transformations: Array<DataTransformerConfig | CustomTransformOperator> = getLogsExtractFields(dataFrame);
 
       let labelFilters = buildLabelFilters(columnsWithMeta);
 
@@ -174,6 +174,9 @@ export function LogsTable(props: Props) {
       onCellFilterAdded={props.onClickFilterLabel && props.onClickFilterOutLabel ? onCellFilterAdded : undefined}
       height={props.height}
       footerOptions={{ show: true, reducer: ['count'], countRows: true }}
+      initialSortBy={[
+        { displayName: logsFrame?.timeField.name || '', desc: logsSortOrder === LogsSortOrder.Descending },
+      ]}
     />
   );
 }
@@ -197,7 +200,7 @@ const isFieldFilterable = (field: Field, bodyName: string, timeName: string) => 
 
 // TODO: explore if `logsFrame.ts` can help us with getting the right fields
 // TODO Why is typeInfo not defined on the Field interface?
-function extractFields(dataFrame: DataFrame) {
+export function getLogsExtractFields(dataFrame: DataFrame) {
   return dataFrame.fields
     .filter((field: Field & { typeInfo?: { frame: string } }) => {
       const isFieldLokiLabels =

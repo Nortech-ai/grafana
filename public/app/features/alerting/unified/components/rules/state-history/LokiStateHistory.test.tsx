@@ -1,24 +1,26 @@
-import 'whatwg-fetch';
-import { render, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
-import React from 'react';
-import { byRole, byText } from 'testing-library-selector';
+import { Props } from 'react-virtualized-auto-sizer';
+import { render, waitFor } from 'test/test-utils';
+import { byRole, byTestId, byText } from 'testing-library-selector';
 
 import { DataFrameJSON } from '@grafana/data';
-import { setBackendSrv } from '@grafana/runtime';
-
-import { TestProvider } from '../../../../../../../test/helpers/TestProvider';
-import { backendSrv } from '../../../../../../core/services/backend_srv';
+import { setupMswServer } from 'app/features/alerting/unified/mockApi';
 
 import LokiStateHistory from './LokiStateHistory';
 
-const server = setupServer();
+const server = setupMswServer();
+
+jest.mock('react-virtualized-auto-sizer', () => {
+  return ({ children }: Props) =>
+    children({
+      height: 600,
+      scaledHeight: 600,
+      scaledWidth: 1,
+      width: 1,
+    });
+});
 
 beforeAll(() => {
-  setBackendSrv(backendSrv);
-  server.listen({ onUnhandledRequest: 'error' });
-
   server.use(
     http.get('/api/v1/rules/history', () =>
       HttpResponse.json<DataFrameJSON>({
@@ -69,10 +71,6 @@ beforeAll(() => {
   );
 });
 
-afterAll(() => {
-  server.close();
-});
-
 window.HTMLElement.prototype.scrollIntoView = jest.fn();
 
 const ui = {
@@ -80,11 +78,12 @@ const ui = {
   timestampViewer: byRole('list', { name: 'State history by timestamp' }),
   record: byRole('listitem'),
   noRecords: byText('No state transitions have occurred in the last 30 days'),
+  timelineChart: byTestId('uplot-main-div'),
 };
 
 describe('LokiStateHistory', () => {
   it('should render history records', async () => {
-    render(<LokiStateHistory ruleUID="ABC123" />, { wrapper: TestProvider });
+    render(<LokiStateHistory ruleUID="ABC123" />);
 
     await waitFor(() => expect(ui.loadingIndicator.query()).not.toBeInTheDocument());
 
@@ -96,6 +95,14 @@ describe('LokiStateHistory', () => {
     expect(timestampViewerElement).toHaveTextContent('/api/folders/:uid/');
   });
 
+  it('should render timeline chart', async () => {
+    render(<LokiStateHistory ruleUID="ABC123" />);
+
+    await waitFor(() => expect(ui.loadingIndicator.query()).not.toBeInTheDocument());
+
+    expect(ui.timelineChart.get()).toBeInTheDocument();
+  });
+
   it('should render no entries message when no records are returned', async () => {
     server.use(
       http.get('/api/v1/rules/history', () =>
@@ -103,7 +110,7 @@ describe('LokiStateHistory', () => {
       )
     );
 
-    render(<LokiStateHistory ruleUID="abcd" />, { wrapper: TestProvider });
+    render(<LokiStateHistory ruleUID="abcd" />);
 
     await waitFor(() => expect(ui.loadingIndicator.query()).not.toBeInTheDocument());
 

@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -9,32 +10,32 @@ import (
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/gtime"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/grafana/grafana/pkg/api/dtos"
+	"github.com/grafana/grafana/pkg/apimachinery/errutil"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/expr"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/plugins"
-	"github.com/grafana/grafana/pkg/services/auth/identity"
 	"github.com/grafana/grafana/pkg/services/contexthandler"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/plugincontext"
 	"github.com/grafana/grafana/pkg/services/validations"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/tsdb/grafanads"
-	"github.com/grafana/grafana/pkg/tsdb/legacydata"
-	"github.com/grafana/grafana/pkg/util/errutil"
 )
 
 const (
-	HeaderPluginID        = "X-Plugin-Id"      // can be used for routing
-	HeaderDatasourceUID   = "X-Datasource-Uid" // can be used for routing/ load balancing
-	HeaderDashboardUID    = "X-Dashboard-Uid"  // mainly useful for debugging slow queries
-	HeaderPanelID         = "X-Panel-Id"       // mainly useful for debugging slow queries
-	HeaderPanelPluginType = "X-Panel-Plugin-Type"
-	HeaderQueryGroupID    = "X-Query-Group-Id"    // mainly useful for finding related queries with query chunking
-	HeaderFromExpression  = "X-Grafana-From-Expr" // used by datasources to identify expression queries
+	HeaderPluginID       = "X-Plugin-Id"      // can be used for routing
+	HeaderDatasourceUID  = "X-Datasource-Uid" // can be used for routing/ load balancing
+	HeaderDashboardUID   = "X-Dashboard-Uid"  // mainly useful for debugging slow queries
+	HeaderPanelID        = "X-Panel-Id"       // mainly useful for debugging slow queries
+	HeaderPanelPluginId  = "X-Panel-Plugin-Id"
+	HeaderQueryGroupID   = "X-Query-Group-Id"    // mainly useful for finding related queries with query chunking
+	HeaderFromExpression = "X-Grafana-From-Expr" // used by datasources to identify expression queries
 )
 
 func ProvideService(
@@ -125,7 +126,7 @@ func (s *ServiceImpl) executeConcurrentQueries(ctx context.Context, user identit
 			if theErr, ok := r.(error); ok {
 				err = theErr
 			} else if theErrString, ok := r.(string); ok {
-				err = fmt.Errorf(theErrString)
+				err = errors.New(theErrString)
 			} else {
 				err = fmt.Errorf("unexpected error - %s", s.cfg.UserFacingDefaultError)
 			}
@@ -277,7 +278,7 @@ func (s *ServiceImpl) parseMetricRequest(ctx context.Context, user identity.Requ
 		return nil, ErrNoQueriesFound
 	}
 
-	timeRange := legacydata.NewDataTimeRange(reqDTO.From, reqDTO.To)
+	timeRange := gtime.NewTimeRange(reqDTO.From, reqDTO.To)
 	req := &parsedRequest{
 		hasExpression: false,
 		parsedQueries: make(map[string][]parsedQuery),
@@ -306,14 +307,12 @@ func (s *ServiceImpl) parseMetricRequest(ctx context.Context, user identity.Requ
 			req.parsedQueries[ds.UID] = []parsedQuery{}
 		}
 
-		s.log.Debug("Processing metrics query", "query", query)
-
 		modelJSON, err := query.MarshalJSON()
 		if err != nil {
 			return nil, err
 		}
 
-		req.parsedQueries[ds.UID] = append(req.parsedQueries[ds.UID], parsedQuery{
+		pq := parsedQuery{
 			datasource: ds,
 			query: backend.DataQuery{
 				TimeRange: backend.TimeRange{
@@ -327,7 +326,16 @@ func (s *ServiceImpl) parseMetricRequest(ctx context.Context, user identity.Requ
 				JSON:          modelJSON,
 			},
 			rawQuery: query,
-		})
+		}
+		req.parsedQueries[ds.UID] = append(req.parsedQueries[ds.UID], pq)
+
+		s.log.Debug("Processed metrics query",
+			"ref_id", pq.query.RefID,
+			"from", timeRange.GetFromAsMsEpoch(),
+			"to", timeRange.GetToAsMsEpoch(),
+			"interval", pq.query.Interval.Milliseconds(),
+			"max_data_points", pq.query.MaxDataPoints,
+			"query", string(modelJSON))
 	}
 
 	return req, req.validateRequest(ctx)

@@ -1,9 +1,11 @@
 import { AnnotationChangeEvent, AnnotationEventUIModel, CoreApp, DataFrame } from '@grafana/data';
-import { AdHocFiltersVariable, dataLayers, SceneDataLayers, sceneGraph, sceneUtils, VizPanel } from '@grafana/scenes';
+import { config, getDataSourceSrv } from '@grafana/runtime';
+import { AdHocFiltersVariable, dataLayers, sceneGraph, sceneUtils, VizPanel } from '@grafana/scenes';
 import { DataSourceRef } from '@grafana/schema';
 import { AdHocFilterItem, PanelContext } from '@grafana/ui';
 import { deleteAnnotation, saveAnnotation, updateAnnotation } from 'app/features/annotations/api';
 
+import { dashboardSceneGraph } from '../utils/dashboardSceneGraph';
 import { getDashboardSceneFor, getPanelIdForVizPanel, getQueryRunnerFor } from '../utils/utils';
 
 import { DashboardScene } from './DashboardScene';
@@ -120,21 +122,16 @@ export function setDashboardPanelContext(vizPanel: VizPanel, context: PanelConte
     //return onUpdatePanelSnapshotData(this.props.panel, frames);
     return Promise.resolve(true);
   };
-
-  // Backward compatibility with id
-  context.instanceState = {
-    legacyPanelId: getPanelIdForVizPanel(vizPanel),
-  };
 }
 
 function getBuiltInAnnotationsLayer(scene: DashboardScene): dataLayers.AnnotationsDataLayer | undefined {
+  const set = dashboardSceneGraph.getDataLayers(scene);
   // When there is no builtin annotations query we disable the ability to add annotations
-  if (scene.state.$data instanceof SceneDataLayers) {
-    for (const layer of scene.state.$data.state.layers) {
-      if (layer instanceof dataLayers.AnnotationsDataLayer) {
-        if (layer.state.isEnabled && layer.state.query.builtIn) {
-          return layer;
-        }
+
+  for (const layer of set.state.annotationLayers) {
+    if (layer instanceof dataLayers.AnnotationsDataLayer) {
+      if (layer.state.isEnabled && layer.state.query.builtIn) {
+        return layer;
       }
     }
   }
@@ -164,6 +161,9 @@ export function getAdHocFilterVariableFor(scene: DashboardScene, ds: DataSourceR
   const newVariable = new AdHocFiltersVariable({
     name: 'Filters',
     datasource: ds,
+    supportsMultiValueOperators: Boolean(getDataSourceSrv().getInstanceSettings(ds)?.meta.multiValueFilterOperators),
+    useQueriesAsFilterForOptions: true,
+    layout: config.featureToggles.newFiltersUI ? 'combobox' : undefined,
   });
 
   // Add it to the scene

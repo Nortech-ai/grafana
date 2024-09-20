@@ -1,19 +1,12 @@
-import { act, render, screen } from '@testing-library/react';
-import React from 'react';
-import { Provider } from 'react-redux';
-import { Router } from 'react-router-dom';
+import { act, screen } from '@testing-library/react';
 import { useEffectOnce } from 'react-use';
-import { Props as AutoSizerProps } from 'react-virtualized-auto-sizer';
-import { getGrafanaContextMock } from 'test/mocks/getGrafanaContextMock';
+import { render } from 'test/test-utils';
 
 import { TextBoxVariableModel } from '@grafana/data';
-import { locationService } from '@grafana/runtime';
 import { Dashboard } from '@grafana/schema';
 import appEvents from 'app/core/app_events';
-import { GrafanaContext } from 'app/core/context/GrafanaContext';
 import { GetVariables } from 'app/features/variables/state/selectors';
 import { VariablesChanged } from 'app/features/variables/types';
-import { configureStore } from 'app/store/configureStore';
 import { DashboardMeta } from 'app/types';
 
 import { DashboardModel } from '../state';
@@ -42,31 +35,8 @@ jest.mock('app/features/dashboard/dashgrid/LazyLoader', () => {
   return { LazyLoader };
 });
 
-jest.mock('react-virtualized-auto-sizer', () => {
-  // The size of the children need to be small enough to be outside the view.
-  // So it does not trigger the query to be run by the PanelQueryRunner.
-  return ({ children }: AutoSizerProps) =>
-    children({
-      scaledHeight: 1,
-      height: 1,
-      scaledWidth: 1,
-      width: 1,
-    });
-});
-
 function setup(props: Props) {
-  const context = getGrafanaContextMock();
-  const store = configureStore({});
-
-  return render(
-    <GrafanaContext.Provider value={context}>
-      <Provider store={store}>
-        <Router history={locationService.getHistory()}>
-          <DashboardGrid {...props} />
-        </Router>
-      </Provider>
-    </GrafanaContext.Provider>
-  );
+  return render(<DashboardGrid {...props} />);
 }
 
 function getTestDashboard(

@@ -1,16 +1,14 @@
 import { css } from '@emotion/css';
-import React, { useEffect, useMemo } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useEffect, useMemo } from 'react';
+import { useFormContext, Controller } from 'react-hook-form';
 
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { Field, InputControl, useStyles2, VirtualizedSelect } from '@grafana/ui';
+import { Field, useStyles2, VirtualizedSelect } from '@grafana/ui';
 import { useDispatch } from 'app/types';
 
 import { useUnifiedAlertingSelector } from '../../hooks/useUnifiedAlertingSelector';
 import { fetchRulerRulesAction } from '../../state/actions';
 import { RuleFormValues } from '../../types/rule-form';
-
-import { checkForPathSeparator } from './util';
 
 interface Props {
   rulesSourceName: string;
@@ -56,7 +54,7 @@ export const GroupAndNamespaceFields = ({ rulesSourceName }: Props) => {
         error={errors.namespace?.message}
         invalid={!!errors.namespace?.message}
       >
-        <InputControl
+        <Controller
           render={({ field: { onChange, ref, ...field } }) => (
             <VirtualizedSelect
               {...field}
@@ -74,14 +72,11 @@ export const GroupAndNamespaceFields = ({ rulesSourceName }: Props) => {
           control={control}
           rules={{
             required: { value: true, message: 'Required.' },
-            validate: {
-              pathSeparator: checkForPathSeparator,
-            },
           }}
         />
       </Field>
       <Field data-testid="group-picker" label="Group" error={errors.group?.message} invalid={!!errors.group?.message}>
-        <InputControl
+        <Controller
           render={({ field: { ref, ...field } }) => (
             <VirtualizedSelect
               {...field}
@@ -98,9 +93,6 @@ export const GroupAndNamespaceFields = ({ rulesSourceName }: Props) => {
           control={control}
           rules={{
             required: { value: true, message: 'Required.' },
-            validate: {
-              pathSeparator: checkForPathSeparator,
-            },
           }}
         />
       </Field>
@@ -109,16 +101,16 @@ export const GroupAndNamespaceFields = ({ rulesSourceName }: Props) => {
 };
 
 const getStyle = (theme: GrafanaTheme2) => ({
-  flexRow: css`
-    display: flex;
-    flex-direction: row;
-    justify-content: flex-start;
+  flexRow: css({
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
 
-    & > * + * {
-      margin-left: ${theme.spacing(3)};
-    }
-  `,
-  input: css`
-    width: 330px !important;
-  `,
+    '& > * + *': {
+      marginLeft: theme.spacing(3),
+    },
+  }),
+  input: css({
+    width: '330px !important',
+  }),
 });

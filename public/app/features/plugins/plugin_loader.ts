@@ -4,15 +4,18 @@ import {
   DataSourceJsonData,
   DataSourcePlugin,
   DataSourcePluginMeta,
+  PluginLoadingStrategy,
   PluginMeta,
 } from '@grafana/data';
-import { SystemJS } from '@grafana/runtime';
 import { DataQuery } from '@grafana/schema';
 
 import { GenericDataSourcePlugin } from '../datasources/types';
 
 import builtInPlugins from './built_in_plugins';
-import { registerPluginInCache } from './loader/cache';
+import { getPluginFromCache, registerPluginInCache } from './loader/cache';
+// SystemJS has to be imported before the sharedDependenciesMap
+import { SystemJS } from './loader/systemjs';
+// eslint-disable-next-line import/order
 import { sharedDependenciesMap } from './loader/sharedDependencies';
 import { decorateSystemJSFetch, decorateSystemJSResolve, decorateSystemJsOnload } from './loader/systemjsHooks';
 import { SystemJSWithLoaderHooks } from './loader/types';
@@ -21,13 +24,35 @@ import { importPluginModuleInSandbox } from './sandbox/sandbox_plugin_loader';
 import { isFrontendSandboxSupported } from './sandbox/utils';
 
 const imports = buildImportMap(sharedDependenciesMap);
+
 SystemJS.addImportMap({ imports });
 
 const systemJSPrototype: SystemJSWithLoaderHooks = SystemJS.constructor.prototype;
 
-// Monaco Editors reliance on RequireJS means we need to transform
-// the content of the plugin code at runtime which can only be done with fetch/eval.
-systemJSPrototype.shouldFetch = () => true;
+// This instructs SystemJS to load plugin assets using fetch and eval if it returns a truthy value, otherwise
+// it will load the plugin using a script tag. The logic that sets loadingStrategy comes from the backend.
+// See: pkg/services/pluginsintegration/pluginassets/pluginassets.go
+systemJSPrototype.shouldFetch = function (url) {
+  const pluginInfo = getPluginFromCache(url);
+  const jsTypeRegEx = /^[^#?]+\.(js)([?#].*)?$/;
+
+  if (!jsTypeRegEx.test(url)) {
+    return true;
+  }
+
+  return Boolean(pluginInfo?.loadingStrategy !== PluginLoadingStrategy.script);
+};
+
+const originalImport = systemJSPrototype.import;
+// Hook Systemjs import to support plugins that only have a default export.
+systemJSPrototype.import = function (...args: Parameters<typeof originalImport>) {
+  return originalImport.apply(this, args).then((module) => {
+    if (module && module.__useDefault) {
+      return module.default;
+    }
+    return module;
+  });
+};
 
 const systemJSFetch = systemJSPrototype.fetch;
 systemJSPrototype.fetch = function (url: string, options?: Record<string, unknown>) {
@@ -44,17 +69,19 @@ systemJSPrototype.onload = decorateSystemJsOnload;
 
 export async function importPluginModule({
   path,
+  pluginId,
+  loadingStrategy,
   version,
   isAngular,
-  pluginId,
 }: {
   path: string;
   pluginId: string;
+  loadingStrategy: PluginLoadingStrategy;
   version?: string;
   isAngular?: boolean;
 }): Promise<System.Module> {
   if (version) {
-    registerPluginInCache({ path, version });
+    registerPluginInCache({ path, version, loadingStrategy });
   }
 
   const builtIn = builtInPlugins[path];
@@ -78,10 +105,13 @@ export async function importPluginModule({
 }
 
 export function importDataSourcePlugin(meta: DataSourcePluginMeta): Promise<GenericDataSourcePlugin> {
+  const isAngular = meta.angular?.detected ?? meta.angularDetected;
+  const fallbackLoadingStrategy = meta.loadingStrategy ?? PluginLoadingStrategy.fetch;
   return importPluginModule({
     path: meta.module,
     version: meta.info?.version,
-    isAngular: meta.angular?.detected,
+    isAngular,
+    loadingStrategy: fallbackLoadingStrategy,
     pluginId: meta.id,
   }).then((pluginExports) => {
     if (pluginExports.plugin) {
@@ -106,10 +136,13 @@ export function importDataSourcePlugin(meta: DataSourcePluginMeta): Promise<Gene
 }
 
 export function importAppPlugin(meta: PluginMeta): Promise<AppPlugin> {
+  const isAngular = meta.angular?.detected ?? meta.angularDetected;
+  const fallbackLoadingStrategy = meta.loadingStrategy ?? PluginLoadingStrategy.fetch;
   return importPluginModule({
     path: meta.module,
     version: meta.info?.version,
-    isAngular: meta.angular?.detected,
+    isAngular,
+    loadingStrategy: fallbackLoadingStrategy,
     pluginId: meta.id,
   }).then((pluginExports) => {
     const plugin: AppPlugin = pluginExports.plugin ? pluginExports.plugin : new AppPlugin();

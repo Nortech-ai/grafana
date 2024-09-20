@@ -1,11 +1,9 @@
-import React, { FormEvent } from 'react';
-import { useAsync } from 'react-use';
+import { FormEvent } from 'react';
+import * as React from 'react';
 
-import { SelectableValue, DataSourceInstanceSettings } from '@grafana/data';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { SelectableValue, DataSourceInstanceSettings, getDataSourceRef } from '@grafana/data';
 import { QueryVariable, sceneGraph } from '@grafana/scenes';
-import { DataSourceRef, VariableRefresh, VariableSort } from '@grafana/schema';
-import { getVariableQueryEditor } from 'app/features/variables/editor/getVariableQueryEditor';
+import { VariableRefresh, VariableSort } from '@grafana/schema';
 
 import { QueryVariableEditorForm } from '../components/QueryVariableForm';
 
@@ -16,16 +14,8 @@ interface QueryVariableEditorProps {
 type VariableQueryType = QueryVariable['state']['query'];
 
 export function QueryVariableEditor({ variable, onRunQuery }: QueryVariableEditorProps) {
-  const { datasource: datasourceRef, regex, sort, refresh, isMulti, includeAll, allValue, query } = variable.useState();
+  const { datasource, regex, sort, refresh, isMulti, includeAll, allValue, query } = variable.useState();
   const { value: timeRange } = sceneGraph.getTimeRange(variable).useState();
-
-  const { value: dsConfig } = useAsync(async () => {
-    const datasource = await getDataSourceSrv().get(datasourceRef ?? '');
-    const VariableQueryEditor = await getVariableQueryEditor(datasource);
-
-    return { datasource, VariableQueryEditor };
-  }, [datasourceRef]);
-  const { datasource, VariableQueryEditor } = dsConfig ?? {};
 
   const onRegExChange = (event: React.FormEvent<HTMLTextAreaElement>) => {
     variable.setState({ regex: event.currentTarget.value });
@@ -46,22 +36,35 @@ export function QueryVariableEditor({ variable, onRunQuery }: QueryVariableEdito
     variable.setState({ allValue: event.currentTarget.value });
   };
   const onDataSourceChange = (dsInstanceSettings: DataSourceInstanceSettings) => {
-    const datasource: DataSourceRef = { uid: dsInstanceSettings.uid, type: dsInstanceSettings.type };
+    const datasource = getDataSourceRef(dsInstanceSettings);
+
+    if (variable.state.datasource && variable.state.datasource.type !== datasource.type) {
+      variable.setState({ datasource, query: '', definition: '' });
+      return;
+    }
+
     variable.setState({ datasource });
   };
   const onQueryChange = (query: VariableQueryType) => {
-    variable.setState({ query });
+    let definition: string;
+    if (typeof query === 'string') {
+      definition = query;
+    } else if (query.hasOwnProperty('query') && typeof query.query === 'string') {
+      definition = query.query;
+    } else {
+      definition = '';
+    }
+    variable.setState({ query, definition });
     onRunQuery();
   };
 
   return (
     <QueryVariableEditorForm
-      datasource={datasource}
+      datasource={datasource ?? undefined}
       onDataSourceChange={onDataSourceChange}
       query={query}
       onQueryChange={onQueryChange}
       onLegacyQueryChange={onQueryChange}
-      VariableQueryEditor={VariableQueryEditor}
       timeRange={timeRange}
       regex={regex}
       onRegExChange={onRegExChange}

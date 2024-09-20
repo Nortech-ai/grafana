@@ -1,5 +1,3 @@
-import React from 'react';
-
 import { NavModel, NavModelItem, PageLayoutType, arrayUtils } from '@grafana/data';
 import { SceneComponentProps, SceneObjectBase } from '@grafana/scenes';
 import { DashboardLink } from '@grafana/schema';
@@ -79,7 +77,7 @@ export class DashboardLinksEditView extends SceneObjectBase<DashboardLinksEditVi
 function DashboardLinksEditViewRenderer({ model }: SceneComponentProps<DashboardLinksEditView>) {
   const { editIndex } = model.useState();
   const dashboard = getDashboardSceneFor(model);
-  const { links, overlay } = dashboard.useState();
+  const { links } = dashboard.useState();
   const { navModel, pageNav } = useDashboardEditPageNav(dashboard, model.getUrlKey());
   const linkToEdit = editIndex !== undefined ? links[editIndex] : undefined;
 
@@ -107,7 +105,6 @@ function DashboardLinksEditViewRenderer({ model }: SceneComponentProps<Dashboard
         onDuplicate={model.onDuplicate}
         onOrderChange={model.onOrderChange}
       />
-      {overlay && <overlay.Component model={overlay} />}
     </Page>
   );
 }
@@ -122,12 +119,9 @@ interface EditLinkViewProps {
 }
 
 function EditLinkView({ pageNav, link, navModel, dashboard, onChange, onGoBack }: EditLinkViewProps) {
-  const parentTab = pageNav.children!.find((p) => p.active)!;
-  parentTab.parentItem = pageNav;
-
   const editLinkPageNav = {
     text: 'Edit link',
-    parentItem: parentTab,
+    parentItem: pageNav,
   };
 
   return (

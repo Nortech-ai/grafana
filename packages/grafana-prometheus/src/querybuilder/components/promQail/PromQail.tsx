@@ -1,23 +1,21 @@
+// Core Grafana history https://github.com/grafana/grafana/blob/v11.0.0-preview/public/app/plugins/datasource/prometheus/querybuilder/components/promQail/PromQail.tsx
 import { css, cx } from '@emotion/css';
-import React, { useEffect, useReducer, useRef, useState } from 'react';
+import { PayloadAction, createSlice } from '@reduxjs/toolkit';
+import { useEffect, useReducer, useRef, useState } from 'react';
 
-import { GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2, store } from '@grafana/data';
 import { reportInteraction } from '@grafana/runtime';
 import { Alert, Button, Checkbox, Input, Spinner, useTheme2 } from '@grafana/ui';
 
 import { PrometheusDatasource } from '../../../datasource';
-import store from '../../../gcopypaste/app/core/store';
 import { PromVisualQuery } from '../../types';
 
 import { QuerySuggestionContainer } from './QuerySuggestionContainer';
 // @ts-ignore until we can get these added for icons
 import AI_Logo_color from './resources/AI_Logo_color.svg';
 import { promQailExplain, promQailSuggest } from './state/helpers';
-import { initialState, stateSlice } from './state/state';
+import { createInteraction, initialState } from './state/state';
 import { Interaction, SuggestionType } from './types';
-
-// actions to update the state
-const { showStartingMessage, indicateCheckbox, addInteraction, updateInteraction } = stateSlice.actions;
 
 export type PromQailProps = {
   query: PromVisualQuery;
@@ -565,3 +563,54 @@ export const queryAssistanttestIds = {
   submitPrompt: 'submit-prompt',
   refinePrompt: 'refine-prompt',
 };
+
+const stateSlice = createSlice({
+  name: 'metrics-modal-state',
+  initialState: initialState(),
+  reducers: {
+    showExplainer: (state, action: PayloadAction<boolean>) => {
+      state.showExplainer = action.payload;
+    },
+    showStartingMessage: (state, action: PayloadAction<boolean>) => {
+      state.showStartingMessage = action.payload;
+    },
+    indicateCheckbox: (state, action: PayloadAction<boolean>) => {
+      state.indicateCheckbox = action.payload;
+    },
+    askForQueryHelp: (state, action: PayloadAction<boolean>) => {
+      state.askForQueryHelp = action.payload;
+    },
+    /*
+     * start working on a collection of interactions
+     * {
+     *  askForhelp y n
+     *  prompt question
+     *  queries querySuggestions
+     * }
+     *
+     */
+    addInteraction: (state, action: PayloadAction<{ suggestionType: SuggestionType; isLoading: boolean }>) => {
+      // AI or Historical?
+      const interaction = createInteraction(action.payload.suggestionType, action.payload.isLoading);
+      const interactions = state.interactions;
+      state.interactions = interactions.concat([interaction]);
+    },
+    updateInteraction: (state, action: PayloadAction<{ idx: number; interaction: Interaction }>) => {
+      // update the interaction by index
+      // will most likely be the last interaction but we might update previous by giving them cues of helpful or not
+      const index = action.payload.idx;
+      const updInteraction = action.payload.interaction;
+
+      state.interactions = state.interactions.map((interaction: Interaction, idx: number) => {
+        if (idx === index) {
+          return updInteraction;
+        }
+
+        return interaction;
+      });
+    },
+  },
+});
+
+// actions to update the state
+export const { showStartingMessage, indicateCheckbox, addInteraction, updateInteraction } = stateSlice.actions;

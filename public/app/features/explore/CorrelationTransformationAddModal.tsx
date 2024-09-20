@@ -1,10 +1,10 @@
 import { css } from '@emotion/css';
-import React, { useId, useState, useMemo, useEffect } from 'react';
+import { useId, useState, useMemo, useEffect } from 'react';
 import Highlighter from 'react-highlight-words';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 
 import { DataLinkTransformationConfig, ScopedVars } from '@grafana/data';
-import { Button, Field, Icon, Input, InputControl, Label, Modal, Select, Tooltip, Stack } from '@grafana/ui';
+import { Button, Field, Icon, Input, Label, Modal, Select, Tooltip, Stack } from '@grafana/ui';
 
 import {
   getSupportedTransTypeDetails,
@@ -138,7 +138,7 @@ export const CorrelationTransformationAddModal = ({
         field variables.
       </p>
       <Field label="Field">
-        <InputControl
+        <Controller
           control={control}
           render={({ field: { onChange, ref, ...field } }) => (
             <Select
@@ -164,12 +164,12 @@ export const CorrelationTransformationAddModal = ({
           <pre>
             <Highlighter
               textToHighlight={exampleValue}
-              searchWords={[isExpValid ? getValues('expression') ?? '' : '']}
+              searchWords={[isExpValid ? (getValues('expression') ?? '') : '']}
               autoEscape={false}
             />
           </pre>
           <Field label="Type">
-            <InputControl
+            <Controller
               control={control}
               render={({ field: { onChange, ref, ...field } }) => (
                 <Select

@@ -1,3 +1,4 @@
+// Core Grafana history https://github.com/grafana/grafana/blob/v11.0.0-preview/public/app/plugins/datasource/prometheus/language_utils.ts
 import { invert } from 'lodash';
 import { Token } from 'prismjs';
 
@@ -15,7 +16,7 @@ import {
 import { addLabelToQuery } from './add_label_to_query';
 import { SUGGESTIONS_LIMIT } from './language_provider';
 import { PROMETHEUS_QUERY_BUILDER_MAX_RESULTS } from './querybuilder/components/MetricSelect';
-import { PrometheusCacheLevel, PromMetricsMetadata, PromMetricsMetadataItem } from './types';
+import { PrometheusCacheLevel, PromMetricsMetadata, PromMetricsMetadataItem, RecordingRuleIdentifier } from './types';
 
 export const processHistogramMetrics = (metrics: string[]) => {
   const resultSet: Set<string> = new Set();
@@ -64,9 +65,17 @@ export function processLabels(labels: Array<{ [key: string]: string }>, withName
 
 // const cleanSelectorRegexp = /\{(\w+="[^"\n]*?")(,\w+="[^"\n]*?")*\}/;
 export const selectorRegexp = /\{[^}]*?(\}|$)/;
-export const labelRegexp = /\b(\w+)(!?=~?)("[^"\n]*?")/g;
 
-export function parseSelector(query: string, cursorOffset = 1): { labelKeys: any[]; selector: string } {
+// This will capture 4 groups. Example label filter => {instance="10.4.11.4:9003"}
+// 1. label:    instance
+// 2. operator: =
+// 3. value:    "10.4.11.4:9003"
+// 4. comma:    if there is a comma it will give ,
+// 5. space:    if there is a space after comma it will give the whole space
+// comma and space is useful for addLabelsToExpression function
+export const labelRegexp = /\b(\w+)(!?=~?)("[^"\n]*?")(,)?(\s*)?/g;
+
+export function parseSelector(query: string, cursorOffset = 1): { labelKeys: string[]; selector: string } {
   if (!query.match(selectorRegexp)) {
     // Special matcher for metrics
     if (query.match(/^[A-Za-z:][\w:]*$/)) {
@@ -130,21 +139,90 @@ export function parseSelector(query: string, cursorOffset = 1): { labelKeys: any
   return { labelKeys, selector: selectorString };
 }
 
-export function expandRecordingRules(query: string, mapping: { [name: string]: string }): string {
-  const ruleNames = Object.keys(mapping);
-  const rulesRegex = new RegExp(`(\\s|^)(${ruleNames.join('|')})(\\s|$|\\(|\\[|\\{)`, 'ig');
-  const expandedQuery = query.replace(rulesRegex, (match, pre, name, post) => `${pre}${mapping[name]}${post}`);
+export function expandRecordingRules(query: string, mapping: { [name: string]: RecordingRuleIdentifier }): string {
+  const getRuleRegex = (ruleName: string) => new RegExp(`(\\s|\\(|^)(${ruleName})(\\s|$|\\(|\\[|\\{)`, 'ig');
 
-  // Split query into array, so if query uses operators, we can correctly add labels to each individual part.
-  const queryArray = expandedQuery.split(/(\+|\-|\*|\/|\%|\^)/);
+  // For each mapping key we iterate over the query and split them in parts.
+  // recording:rule{label=~"/label/value"} * some:other:rule{other_label="value"}
+  // We want to keep parts in here like this:
+  // recording:rule
+  // {label=~"/label/value"} *
+  // some:other:rule
+  // {other_label="value"}
+  const tmpSplitParts = Object.keys(mapping).reduce<string[]>(
+    (prev, curr) => {
+      let parts: string[] = [];
+      let tmpParts: string[] = [];
+      let removeIdx: number[] = [];
 
-  // Regex that matches occurrences of ){ or }{ or ]{ which is a sign of incorrecly added labels.
-  const invalidLabelsRegex = /(\)\{|\}\{|\]\{)/;
-  const correctlyExpandedQueryArray = queryArray.map((query) => {
-    return addLabelsToExpression(query, invalidLabelsRegex);
+      // we iterate over prev because it might be like this after first loop
+      // recording:rule and {label=~"/label/value"} * some:other:rule{other_label="value"}
+      // so we need to split the second part too
+      prev.filter(Boolean).forEach((p, i) => {
+        const doesMatch = p.match(getRuleRegex(curr));
+        if (doesMatch) {
+          parts = p.split(curr);
+          if (parts.length === 2) {
+            // this is the case when we have such result for this query
+            // max (metric{label="value"})
+            // "max(", "{label="value"}"
+            removeIdx.push(i);
+            tmpParts.push(...[parts[0], curr, parts[1]].filter(Boolean));
+          } else if (parts.length > 2) {
+            // this is the case when we have such query
+            // metric + metric
+            // when we split it we have such data
+            // "", " + ", ""
+            removeIdx.push(i);
+            parts = parts.map((p) => (p === '' ? curr : p));
+            tmpParts.push(...parts);
+          }
+        }
+      });
+
+      // if we have idx to remove that means we split the value in that index.
+      // No need to keep it. Have the new split values instead.
+      removeIdx.forEach((ri) => (prev[ri] = ''));
+      prev = prev.filter(Boolean);
+      prev.push(...tmpParts);
+
+      return prev;
+    },
+    [query]
+  );
+
+  // we have the separate parts. we need to replace the metric and apply the labels if there is any
+  let labelFound = false;
+  const trulyExpandedQuery = tmpSplitParts.map((tsp, i) => {
+    // if we know this loop tsp is a label, not the metric we want to expand
+    if (labelFound) {
+      labelFound = false;
+      return '';
+    }
+
+    // check if the mapping is there
+    if (mapping[tsp]) {
+      const { expandedQuery: recordingRule, identifierValue, identifier } = mapping[tsp];
+      // it is a recording rule. if the following is a label then apply it
+      if (i + 1 !== tmpSplitParts.length && tmpSplitParts[i + 1].match(labelRegexp)) {
+        // the next value in the loop is label. Let's apply labels to the metric
+        labelFound = true;
+        const regexp = new RegExp(`(,)?(\\s)?(${identifier}=\\"${identifierValue}\\")(,)?(\\s)?`, 'g');
+        const labels = tmpSplitParts[i + 1].replace(regexp, '');
+        const invalidLabelsRegex = /(\)\{|\}\{|\]\{)/;
+        return addLabelsToExpression(recordingRule + labels, invalidLabelsRegex);
+      } else {
+        // it is not a recording rule and might be a binary operation in between two recording rules
+        // So no need to do anything. just return it.
+        return recordingRule;
+      }
+    }
+
+    return tsp;
   });
 
-  return correctlyExpandedQueryArray.join('');
+  // Remove empty strings and merge them
+  return trulyExpandedQuery.filter(Boolean).join('');
 }
 
 function addLabelsToExpression(expr: string, invalidLabelsRegexp: RegExp) {
@@ -159,9 +237,15 @@ function addLabelsToExpression(expr: string, invalidLabelsRegexp: RegExp) {
   const exprAfterRegexMatch = expr.slice(indexOfRegexMatch + 1);
 
   // Create arrayOfLabelObjects with label objects that have key, operator and value.
-  const arrayOfLabelObjects: Array<{ key: string; operator: string; value: string }> = [];
-  exprAfterRegexMatch.replace(labelRegexp, (label, key, operator, value) => {
-    arrayOfLabelObjects.push({ key, operator, value });
+  const arrayOfLabelObjects: Array<{
+    key: string;
+    operator: string;
+    value: string;
+    comma?: string;
+    space?: string;
+  }> = [];
+  exprAfterRegexMatch.replace(labelRegexp, (label, key, operator, value, comma, space) => {
+    arrayOfLabelObjects.push({ key, operator, value, comma, space });
     return '';
   });
 
@@ -174,7 +258,19 @@ function addLabelsToExpression(expr: string, invalidLabelsRegexp: RegExp) {
     result = addLabelToQuery(result, obj.key, value, obj.operator);
   });
 
-  return result;
+  // reconstruct the labels
+  let existingLabel = arrayOfLabelObjects.reduce((prev, curr) => {
+    prev += `${curr.key}${curr.operator}${curr.value}${curr.comma ?? ''}${curr.space ?? ''}`;
+    return prev;
+  }, '');
+
+  // Check if there is anything besides labels
+  // Useful for this kind of metrics sum (recording_rule_metric{label1="value1"}) by (env)
+  // if we don't check this part, ) by (env) part will be lost
+  existingLabel = '{' + existingLabel + '}';
+  const potentialLeftOver = exprAfterRegexMatch.replace(existingLabel, '');
+
+  return result + potentialLeftOver;
 }
 
 /**
@@ -251,7 +347,7 @@ export function limitSuggestions(items: string[]) {
   return items.slice(0, SUGGESTIONS_LIMIT);
 }
 
-export function addLimitInfo(items: any[] | undefined): string {
+export function addLimitInfo(items: unknown[] | undefined): string {
   return items && items.length >= SUGGESTIONS_LIMIT ? `, limited to the first ${SUGGESTIONS_LIMIT} received items` : '';
 }
 
@@ -430,6 +526,16 @@ export function getPrometheusTime(date: string | DateTime, roundUp: boolean) {
   return Math.ceil(date.valueOf() / 1000);
 }
 
+/**
+ * Used to truncate metrics, label names and label value in the query builder select components
+ * to improve frontend performance. This is best used with an async select component including
+ * the loadOptions property where we should still allow users to search all results with a string.
+ * This can be done either storing the total results or querying an api that allows for matching a query.
+ *
+ * @param array
+ * @param limit
+ * @returns
+ */
 export function truncateResult<T>(array: T[], limit?: number): T[] {
   if (limit === undefined) {
     limit = PROMETHEUS_QUERY_BUILDER_MAX_RESULTS;

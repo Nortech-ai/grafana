@@ -2,8 +2,8 @@ package folders
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -13,14 +13,14 @@ import (
 	"k8s.io/apiserver/pkg/registry/rest"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	common "k8s.io/kube-openapi/pkg/common"
+	"k8s.io/kube-openapi/pkg/spec3"
 
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/apis/folder/v0alpha1"
-	"github.com/grafana/grafana/pkg/infra/appcontext"
+	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/apiserver/builder"
 	"github.com/grafana/grafana/pkg/services/apiserver/endpoints/request"
-	grafanarest "github.com/grafana/grafana/pkg/services/apiserver/rest"
-	"github.com/grafana/grafana/pkg/services/apiserver/utils"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/folder"
@@ -34,20 +34,21 @@ var resourceInfo = v0alpha1.FolderResourceInfo
 // This is used just so wire has something unique to return
 type FolderAPIBuilder struct {
 	gv            schema.GroupVersion
-	features      *featuremgmt.FeatureManager
+	features      featuremgmt.FeatureToggles
 	namespacer    request.NamespaceMapper
 	folderSvc     folder.Service
 	accessControl accesscontrol.AccessControl
 }
 
 func RegisterAPIService(cfg *setting.Cfg,
-	features *featuremgmt.FeatureManager,
+	features featuremgmt.FeatureToggles,
 	apiregistration builder.APIRegistrar,
 	folderSvc folder.Service,
 	accessControl accesscontrol.AccessControl,
+	registerer prometheus.Registerer,
 ) *FolderAPIBuilder {
-	if !features.IsEnabledGlobally(featuremgmt.FlagGrafanaAPIServerWithExperimentalAPIs) {
-		return nil // skip registration unless opting into experimental apis
+	if !features.IsEnabledGlobally(featuremgmt.FlagKubernetesFolders) {
+		return nil // skip registration unless opting into Kubernetes folders
 	}
 
 	builder := &FolderAPIBuilder{
@@ -98,32 +99,14 @@ func (b *FolderAPIBuilder) GetAPIGroupInfo(
 	scheme *runtime.Scheme,
 	codecs serializer.CodecFactory, // pointer?
 	optsGetter generic.RESTOptionsGetter,
-	dualWrite bool,
+	dualWriteBuilder grafanarest.DualWriteBuilder,
 ) (*genericapiserver.APIGroupInfo, error) {
 	apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(v0alpha1.GROUP, scheme, metav1.ParameterCodec, codecs)
 
 	legacyStore := &legacyStorage{
-		service:    b.folderSvc,
-		namespacer: b.namespacer,
-		tableConverter: utils.NewTableConverter(
-			resourceInfo.GroupResource(),
-			[]metav1.TableColumnDefinition{
-				{Name: "Name", Type: "string", Format: "name"},
-				{Name: "Title", Type: "string", Format: "string", Description: "The display name"},
-				{Name: "Parent", Type: "string", Format: "string", Description: "Parent folder UID"},
-			},
-			func(obj any) ([]interface{}, error) {
-				r, ok := obj.(*v0alpha1.Folder)
-				if ok {
-					accessor, _ := utils.MetaAccessor(r)
-					return []interface{}{
-						r.Name,
-						r.Spec.Title,
-						accessor.GetFolder(),
-					}, nil
-				}
-				return nil, fmt.Errorf("expected resource or info")
-			}),
+		service:        b.folderSvc,
+		namespacer:     b.namespacer,
+		tableConverter: resourceInfo.TableConverter(),
 	}
 
 	storage := map[string]rest.Storage{}
@@ -132,13 +115,16 @@ func (b *FolderAPIBuilder) GetAPIGroupInfo(
 	storage[resourceInfo.StoragePath("count")] = &subCountREST{b.folderSvc}
 	storage[resourceInfo.StoragePath("access")] = &subAccessREST{b.folderSvc}
 
-	// enable dual writes if a RESTOptionsGetter is provided
-	if dualWrite && optsGetter != nil {
+	// enable dual writer
+	if optsGetter != nil && dualWriteBuilder != nil {
 		store, err := newStorage(scheme, optsGetter, legacyStore)
 		if err != nil {
 			return nil, err
 		}
-		storage[resourceInfo.StoragePath()] = grafanarest.NewDualWriter(legacyStore, store)
+		storage[resourceInfo.StoragePath()], err = dualWriteBuilder(resourceInfo.GroupResource(), legacyStore, store)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	apiGroupInfo.VersionedResourcesStorageMap[v0alpha1.VERSION] = storage
@@ -153,6 +139,25 @@ func (b *FolderAPIBuilder) GetAPIRoutes() *builder.APIRoutes {
 	return nil // no custom API routes
 }
 
+func (b *FolderAPIBuilder) PostProcessOpenAPI(oas *spec3.OpenAPI) (*spec3.OpenAPI, error) {
+	// The plugin description
+	oas.Info.Description = "Grafana folders"
+
+	// The root api URL
+	root := "/apis/" + b.GetGroupVersion().String() + "/"
+
+	// Hide the ability to list or watch across all tenants
+	delete(oas.Paths.Paths, root+v0alpha1.FolderResourceInfo.GroupResource().Resource)
+	delete(oas.Paths.Paths, root+"watch/"+v0alpha1.FolderResourceInfo.GroupResource().Resource)
+
+	// The root API discovery list
+	sub := oas.Paths.Paths[root]
+	if sub != nil && sub.Get != nil {
+		sub.Get.Tags = []string{"API Discovery"} // sorts first in the list
+	}
+	return oas, nil
+}
+
 func (b *FolderAPIBuilder) GetAuthorizer() authorizer.Authorizer {
 	return authorizer.AuthorizerFunc(
 		func(ctx context.Context, attr authorizer.Attributes) (authorized authorizer.Decision, reason string, err error) {
@@ -161,7 +166,7 @@ func (b *FolderAPIBuilder) GetAuthorizer() authorizer.Authorizer {
 			}
 
 			// require a user
-			user, err := appcontext.User(ctx)
+			user, err := identity.GetRequester(ctx)
 			if err != nil {
 				return authorizer.DecisionDeny, "valid user is required", err
 			}

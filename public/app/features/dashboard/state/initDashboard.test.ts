@@ -1,5 +1,5 @@
-import configureMockStore from 'redux-mock-store';
-import thunk from 'redux-thunk';
+import configureMockStore, { MockStore } from 'redux-mock-store';
+import { thunk } from 'redux-thunk';
 import { Subject } from 'rxjs';
 
 import { BackendSrv, FetchError, locationService, setEchoSrv } from '@grafana/runtime';
@@ -71,7 +71,7 @@ interface ScenarioContext {
   loaderSrv: DashboardLoaderSrv;
   backendSrv: jest.Mocked<BackendSrv>;
   setup: (fn: () => void) => void;
-  actions: any[];
+  actions: ReturnType<MockStore['getActions']>;
   storeState: any;
 }
 

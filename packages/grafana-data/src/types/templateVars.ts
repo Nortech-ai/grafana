@@ -22,7 +22,8 @@ export type TypedVariableModel =
   | CustomVariableModel
   | UserVariableModel
   | OrgVariableModel
-  | DashboardVariableModel;
+  | DashboardVariableModel
+  | SnapshotVariableModel;
 
 export enum VariableRefresh {
   never, // removed from the UI
@@ -52,6 +53,7 @@ export interface AdHocVariableFilter {
   key: string;
   operator: string;
   value: string;
+  values?: string[];
   /** @deprecated  */
   condition?: string;
 }
@@ -64,13 +66,15 @@ export interface AdHocVariableModel extends BaseVariableModel {
    * Filters that are always applied to the lookup of keys. Not shown in the AdhocFilterBuilder UI.
    */
   baseFilters?: AdHocVariableFilter[];
+  /**
+   * Static keys that override any dynamic keys from the datasource.
+   */
+  defaultKeys?: MetricFindValue[];
 }
 
-export interface GroupByVariableModel extends BaseVariableModel {
+export interface GroupByVariableModel extends VariableWithOptions {
   type: 'groupby';
   datasource: DataSourceRef | null;
-  groupByKeys: string[];
-  defaultOptions?: MetricFindValue[];
   multi: true;
 }
 
@@ -175,4 +179,9 @@ export interface BaseVariableModel {
   error: any | null;
   description: string | null;
   usedInRepeat?: boolean;
+}
+
+export interface SnapshotVariableModel extends VariableWithOptions {
+  type: 'snapshot';
+  query: string;
 }

@@ -1,6 +1,9 @@
-import React, { FC, HTMLAttributes, RefCallback } from 'react';
+import { FC, HTMLAttributes } from 'react';
+import * as React from 'react';
 
 import { NavModel, NavModelItem, PageLayoutType } from '@grafana/data';
+
+import { ScrollRefElement } from '../NativeScrollbar';
 
 import { PageContents } from './PageContents';
 
@@ -20,10 +23,12 @@ export interface PageProps extends HTMLAttributes<HTMLDivElement> {
   subTitle?: React.ReactNode;
   /** Control the page layout. */
   layout?: PageLayoutType;
-  /** Can be used to get the scroll container element to access scroll position */
-  scrollRef?: RefCallback<HTMLDivElement>;
-  /** Can be used to update the current scroll position */
-  scrollTop?: number;
+  /**
+   * TODO: Not sure we should deprecated it given the sidecar project?
+   * @deprecated this will be removed when bodyScrolling is enabled by default
+   * Can be used to get the scroll container element to access scroll position
+   * */
+  onSetScrollRef?: (ref: ScrollRefElement) => void;
 }
 
 export interface PageInfoItem {

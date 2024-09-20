@@ -10,6 +10,7 @@ import {
   LoadingState,
   OrgVariableModel,
   QueryVariableModel,
+  SnapshotVariableModel,
   TextBoxVariableModel,
   UserVariableModel,
   VariableHide,
@@ -82,12 +83,14 @@ export function createAdhocVariable(input?: Partial<AdHocVariableModel>): AdHocV
 export function createGroupByVariable(input?: Partial<GroupByVariableModel>): GroupByVariableModel {
   return {
     ...createBaseVariableModel('groupby'),
+    query: '',
     datasource: {
       uid: 'abc-123',
       type: 'prometheus',
     },
-    groupByKeys: [],
     multi: true,
+    current: createVariableOption('job'),
+    options: [createVariableOption('job'), createVariableOption('instance')],
     ...input,
   };
 }
@@ -193,6 +196,16 @@ export function createCustomVariable(input: Partial<CustomVariableModel> = {}): 
     current: createVariableOption('prom-prod', { text: 'Prometheus (main)', selected: true }),
     options: [],
     query: '',
+    ...input,
+  };
+}
+
+export function createSnapshotVariable(input: Partial<SnapshotVariableModel> = {}): SnapshotVariableModel {
+  return {
+    ...createBaseVariableModel('snapshot'),
+    query: '',
+    current: createVariableOption('prom-prod', { text: 'Prometheus (main)', selected: true }),
+    options: [],
     ...input,
   };
 }

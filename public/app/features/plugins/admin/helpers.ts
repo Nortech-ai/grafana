@@ -7,25 +7,40 @@ import { contextSrv } from 'app/core/core';
 import { getBackendSrv } from 'app/core/services/backend_srv';
 import { AccessControlAction } from 'app/types';
 
-import { CatalogPlugin, InstancePlugin, LocalPlugin, RemotePlugin, RemotePluginStatus, Version } from './types';
+import {
+  CatalogPlugin,
+  InstancePlugin,
+  LocalPlugin,
+  ProvisionedPlugin,
+  RemotePlugin,
+  RemotePluginStatus,
+  Version,
+} from './types';
 
 export function mergeLocalsAndRemotes({
   local = [],
   remote = [],
   instance = [],
+  provisioned = [],
   pluginErrors: errors,
 }: {
   local: LocalPlugin[];
   remote?: RemotePlugin[];
   instance?: InstancePlugin[];
+  provisioned?: ProvisionedPlugin[];
   pluginErrors?: PluginError[];
 }): CatalogPlugin[] {
   const catalogPlugins: CatalogPlugin[] = [];
   const errorByPluginId = groupErrorsByPluginId(errors);
 
-  const instancesSet = instance.reduce((set, instancePlugin) => {
-    set.add(instancePlugin.pluginSlug);
-    return set;
+  const instancesMap = instance.reduce((map, instancePlugin) => {
+    map.set(instancePlugin.pluginSlug, instancePlugin);
+    return map;
+  }, new Map<string, InstancePlugin>());
+
+  const provisionedSet = provisioned.reduce((map, provisionedPlugin) => {
+    map.add(provisionedPlugin.slug);
+    return map;
   }, new Set<string>());
 
   // add locals
@@ -51,8 +66,22 @@ export function mergeLocalsAndRemotes({
       if (configCore.featureToggles.managedPluginsInstall && config.pluginAdminExternalManageEnabled) {
         catalogPlugin.isFullyInstalled = catalogPlugin.isCore
           ? true
-          : instancesSet.has(remotePlugin.slug) && catalogPlugin.isInstalled;
-        catalogPlugin.isInstalled = instancesSet.has(remotePlugin.slug) || catalogPlugin.isInstalled;
+          : (instancesMap.has(remotePlugin.slug) || provisionedSet.has(remotePlugin.slug)) && catalogPlugin.isInstalled;
+
+        catalogPlugin.isInstalled = instancesMap.has(remotePlugin.slug) || catalogPlugin.isInstalled;
+
+        const instancePlugin = instancesMap.get(remotePlugin.slug);
+        catalogPlugin.isUpdatingFromInstance =
+          instancesMap.has(remotePlugin.slug) &&
+          catalogPlugin.hasUpdate &&
+          catalogPlugin.installedVersion !== instancePlugin?.version;
+
+        if (instancePlugin?.version && instancePlugin?.version !== remotePlugin.version) {
+          catalogPlugin.hasUpdate = true;
+        }
+
+        catalogPlugin.isUninstallingFromInstance = Boolean(localCounterpart) && !instancesMap.has(remotePlugin.slug);
+        catalogPlugin.isProvisioned = provisionedSet.has(remotePlugin.slug);
       }
 
       catalogPlugins.push(catalogPlugin);
@@ -98,8 +127,8 @@ export function mapRemoteToCatalog(plugin: RemotePlugin, error?: PluginError): C
     id,
     info: {
       logos: {
-        small: `https://grafana.com/api/plugins/${id}/versions/${version}/logos/small`,
-        large: `https://grafana.com/api/plugins/${id}/versions/${version}/logos/large`,
+        small: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${version}/logos/small`,
+        large: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${version}/logos/large`,
       },
       keywords,
     },
@@ -113,6 +142,8 @@ export function mapRemoteToCatalog(plugin: RemotePlugin, error?: PluginError): C
     isPublished: true,
     isInstalled: isDisabled,
     isDisabled: isDisabled,
+    isManaged: isManagedPlugin(id),
+    isPreinstalled: isPreinstalledPlugin(id),
     isDeprecated: status === RemotePluginStatus.Deprecated,
     isCore: plugin.internal,
     isDev: false,
@@ -121,6 +152,7 @@ export function mapRemoteToCatalog(plugin: RemotePlugin, error?: PluginError): C
     error: error?.errorCode,
     angularDetected,
     isFullyInstalled: isDisabled,
+    latestVersion: plugin.version,
   };
 }
 
@@ -162,12 +194,15 @@ export function mapLocalToCatalog(plugin: LocalPlugin, error?: PluginError): Cat
     isDeprecated: false,
     isDev: Boolean(dev),
     isEnterprise: false,
+    isManaged: isManagedPlugin(id),
+    isPreinstalled: isPreinstalledPlugin(id),
     type,
     error: error?.errorCode,
     accessControl: accessControl,
     angularDetected,
     isFullyInstalled: true,
     iam: plugin.iam,
+    latestVersion: plugin.latestVersion,
   };
 }
 
@@ -186,8 +221,8 @@ export function mapToCatalogPlugin(local?: LocalPlugin, remote?: RemotePlugin, e
 
   if (remote) {
     logos = {
-      small: `https://grafana.com/api/plugins/${id}/versions/${remote.version}/logos/small`,
-      large: `https://grafana.com/api/plugins/${id}/versions/${remote.version}/logos/large`,
+      small: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${remote.version}/logos/small`,
+      large: `${config.appSubUrl}/api/gnet/plugins/${id}/versions/${remote.version}/logos/large`,
     };
   } else if (local && local.info.logos) {
     logos = local.info.logos;
@@ -209,6 +244,8 @@ export function mapToCatalogPlugin(local?: LocalPlugin, remote?: RemotePlugin, e
     isDisabled: isDisabled,
     isDeprecated: remote?.status === RemotePluginStatus.Deprecated,
     isPublished: true,
+    isManaged: isManagedPlugin(id),
+    isPreinstalled: isPreinstalledPlugin(id),
     // TODO<check if we would like to keep preferring the remote version>
     name: remote?.name || local?.name || '',
     // TODO<check if we would like to keep preferring the remote version>
@@ -225,9 +262,10 @@ export function mapToCatalogPlugin(local?: LocalPlugin, remote?: RemotePlugin, e
     error: error?.errorCode,
     // Only local plugins have access control metadata
     accessControl: local?.accessControl,
-    angularDetected: local?.angularDetected || remote?.angularDetected,
+    angularDetected: local?.angularDetected ?? remote?.angularDetected,
     isFullyInstalled: Boolean(local) || isDisabled,
     iam: local?.iam,
+    latestVersion: local?.latestVersion || remote?.version || '',
   };
 }
 
@@ -344,6 +382,19 @@ function isNotHiddenByConfig(id: string) {
   return !pluginCatalogHiddenPlugins.includes(id);
 }
 
+export function isManagedPlugin(id: string) {
+  const { pluginCatalogManagedPlugins }: { pluginCatalogManagedPlugins: string[] } = config;
+
+  return pluginCatalogManagedPlugins?.includes(id);
+}
+
+export function isPreinstalledPlugin(id: string): { found: boolean; withVersion: boolean } {
+  const { pluginCatalogPreinstalledPlugins } = config;
+
+  const plugin = pluginCatalogPreinstalledPlugins?.find((p) => p.id === id);
+  return { found: !!plugin?.id, withVersion: !!plugin?.version };
+}
+
 function isDisabledSecretsPlugin(type?: PluginType): boolean {
   return type === PluginType.secretsmanager && !config.secretsManagerPluginEnabled;
 }
@@ -367,10 +418,49 @@ function getPluginDetailsForFuzzySearch(plugins: CatalogPlugin[]): string[] {
 }
 export function filterByKeyword(plugins: CatalogPlugin[], query: string) {
   const dataArray = getPluginDetailsForFuzzySearch(plugins);
-  let uf = new uFuzzy({});
+  let uf = new uFuzzy({ intraMode: 1, intraSub: 0 });
   let idxs = uf.filter(dataArray, query);
   if (idxs === null) {
     return null;
   }
   return idxs.map((id) => getId(dataArray[id]));
+}
+
+export function isPluginUpdateable(plugin: CatalogPlugin) {
+  // If there is no update available, the plugin cannot be updated
+  if (!plugin.hasUpdate) {
+    return false;
+  }
+
+  // Provisioned plugins cannot be updated
+  if (plugin.isProvisioned) {
+    return false;
+  }
+
+  // Core plugins cannot be updated
+  if (plugin.isCore) {
+    return false;
+  }
+
+  // Currently renderer plugins are not supported by the catalog due to complications related to installation / update / uninstall.
+  if (plugin.type === PluginType.renderer) {
+    return false;
+  }
+
+  // Preinstalled plugins (with specified version) cannot be updated
+  if (plugin.isPreinstalled.withVersion) {
+    return false;
+  }
+
+  // If the plugin is currently being updated, it should not be updated
+  if (plugin.isUpdatingFromInstance) {
+    return false;
+  }
+
+  // Managed plugins cannot be updated
+  if (plugin.isManaged) {
+    return false;
+  }
+
+  return true;
 }

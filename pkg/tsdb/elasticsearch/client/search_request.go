@@ -3,6 +3,8 @@ package es
 import (
 	"strings"
 	"time"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 const (
@@ -10,6 +12,15 @@ const (
 	HighlightPostTagsString = "@/HIGHLIGHT@"
 	HighlightFragmentSize   = 2147483647
 	DefaultGeoHashPrecision = 3
+
+	termsOrderTerm = "_term"
+)
+
+type SortOrder string
+
+const (
+	SortOrderAsc  SortOrder = "asc"
+	SortOrderDesc SortOrder = "desc"
 )
 
 // SearchRequestBuilder represents a builder which can build a search request
@@ -22,15 +33,17 @@ type SearchRequestBuilder struct {
 	queryBuilder *QueryBuilder
 	aggBuilders  []AggBuilder
 	customProps  map[string]any
+	timeRange    backend.TimeRange
 }
 
 // NewSearchRequestBuilder create a new search request builder
-func NewSearchRequestBuilder(interval time.Duration) *SearchRequestBuilder {
+func NewSearchRequestBuilder(interval time.Duration, timeRange backend.TimeRange) *SearchRequestBuilder {
 	builder := &SearchRequestBuilder{
 		interval:    interval,
 		sort:        make(map[string]any),
 		customProps: make(map[string]any),
 		aggBuilders: make([]AggBuilder, 0),
+		timeRange:   timeRange,
 	}
 	return builder
 }
@@ -39,6 +52,7 @@ func NewSearchRequestBuilder(interval time.Duration) *SearchRequestBuilder {
 func (b *SearchRequestBuilder) Build() (*SearchRequest, error) {
 	sr := SearchRequest{
 		Index:       b.index,
+		TimeRange:   b.timeRange,
 		Interval:    b.interval,
 		Size:        b.size,
 		Sort:        b.sort,
@@ -73,13 +87,6 @@ func (b *SearchRequestBuilder) Size(size int) *SearchRequestBuilder {
 	b.size = size
 	return b
 }
-
-type SortOrder string
-
-const (
-	SortOrderAsc  SortOrder = "asc"
-	SortOrderDesc SortOrder = "desc"
-)
 
 // Sort adds a "asc" | "desc" sort to the search request
 func (b *SearchRequestBuilder) Sort(order SortOrder, field string, unmappedType string) *SearchRequestBuilder {
@@ -164,8 +171,8 @@ func NewMultiSearchRequestBuilder() *MultiSearchRequestBuilder {
 }
 
 // Search initiates and returns a new search request builder
-func (m *MultiSearchRequestBuilder) Search(interval time.Duration) *SearchRequestBuilder {
-	b := NewSearchRequestBuilder(interval)
+func (m *MultiSearchRequestBuilder) Search(interval time.Duration, timeRange backend.TimeRange) *SearchRequestBuilder {
+	b := NewSearchRequestBuilder(interval, timeRange)
 	m.requestBuilders = append(m.requestBuilders, b)
 	return b
 }
@@ -380,8 +387,6 @@ func (b *aggBuilderImpl) DateHistogram(key, field string, fn func(a *DateHistogr
 
 	return b
 }
-
-const termsOrderTerm = "_term"
 
 func (b *aggBuilderImpl) Terms(key, field string, fn func(a *TermsAggregation, b AggBuilder)) AggBuilder {
 	innerAgg := &TermsAggregation{

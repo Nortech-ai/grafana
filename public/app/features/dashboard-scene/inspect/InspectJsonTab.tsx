@@ -1,5 +1,4 @@
 import { isEqual } from 'lodash';
-import React from 'react';
 import AutoSizer from 'react-virtualized-auto-sizer';
 
 import { SelectableValue } from '@grafana/data';
@@ -8,7 +7,6 @@ import {
   SceneComponentProps,
   SceneDataTransformer,
   sceneGraph,
-  SceneGridItem,
   SceneGridItemStateLike,
   SceneObjectBase,
   SceneObjectRef,
@@ -17,6 +15,7 @@ import {
   sceneUtils,
   VizPanel,
 } from '@grafana/scenes';
+import { LibraryPanel } from '@grafana/schema/';
 import { Button, CodeEditor, Field, Select, useStyles2 } from '@grafana/ui';
 import { t } from 'app/core/internationalization';
 import { getPanelDataFrames } from 'app/features/dashboard/components/HelpWizard/utils';
@@ -26,10 +25,17 @@ import { InspectTab } from 'app/features/inspector/types';
 import { getPrettyJSON } from 'app/features/inspector/utils/utils';
 import { reportPanelInspectInteraction } from 'app/features/search/page/reporting';
 
-import { PanelRepeaterGridItem } from '../scene/PanelRepeaterGridItem';
+import { VizPanelManager } from '../panel-edit/VizPanelManager';
+import { DashboardGridItem } from '../scene/DashboardGridItem';
 import { buildGridItemForPanel } from '../serialization/transformSaveModelToScene';
-import { gridItemToPanel } from '../serialization/transformSceneToSaveModel';
-import { getDashboardSceneFor, getPanelIdForVizPanel, getQueryRunnerFor } from '../utils/utils';
+import { gridItemToPanel, vizPanelToPanel } from '../serialization/transformSceneToSaveModel';
+import {
+  getDashboardSceneFor,
+  getLibraryPanelBehavior,
+  getPanelIdForVizPanel,
+  getQueryRunnerFor,
+  isLibraryPanel,
+} from '../utils/utils';
 
 export type ShowContent = 'panel-json' | 'panel-data' | 'data-frames';
 
@@ -59,7 +65,7 @@ export class InspectJsonTab extends SceneObjectBase<InspectJsonTabState> {
 
   public getOptions(): Array<SelectableValue<ShowContent>> {
     const panel = this.state.panelRef.resolve();
-    const dataProvider = panel.state.$data;
+    const dataProvider = panel.state.$data ?? panel.parent?.state.$data;
 
     const options: Array<SelectableValue<ShowContent>> = [
       {
@@ -107,7 +113,7 @@ export class InspectJsonTab extends SceneObjectBase<InspectJsonTabState> {
     const gridItem = buildGridItemForPanel(panelModel);
     const newState = sceneUtils.cloneSceneObjectState(gridItem.state);
 
-    if (!(panel.parent instanceof SceneGridItem) || !(gridItem instanceof SceneGridItem)) {
+    if (!(panel.parent instanceof DashboardGridItem)) {
       console.error('Cannot update state of panel', panel, gridItem);
       return;
     }
@@ -140,8 +146,13 @@ export class InspectJsonTab extends SceneObjectBase<InspectJsonTabState> {
 
     const panel = this.state.panelRef.resolve();
 
+    // Library panels are not editable from the inspect
+    if (isLibraryPanel(panel)) {
+      return false;
+    }
+
     // Only support normal grid items for now and not repeated items
-    if (!(panel.parent instanceof SceneGridItem)) {
+    if (panel.parent instanceof DashboardGridItem && panel.parent.isRepeated()) {
       return false;
     }
 
@@ -156,7 +167,7 @@ export class InspectJsonTab extends SceneObjectBase<InspectJsonTabState> {
 
     return (
       <div className={styles.wrap}>
-        <div className={styles.toolbar} aria-label={selectors.components.PanelInspector.Json.content}>
+        <div className={styles.toolbar} data-testid={selectors.components.PanelInspector.Json.content}>
           <Field label={t('dashboard.inspect-json.select-source', 'Select source')} className="flex-grow-1">
             <Select
               inputId="select-source-dropdown"
@@ -200,9 +211,23 @@ function getJsonText(show: ShowContent, panel: VizPanel): string {
     case 'panel-json': {
       reportPanelInspectInteraction(InspectTab.JSON, 'panelData');
 
-      if (panel.parent instanceof SceneGridItem || panel.parent instanceof PanelRepeaterGridItem) {
-        objToStringify = gridItemToPanel(panel.parent);
+      const isInspectingLibraryPanel = isLibraryPanel(panel);
+      const gridItem = panel.parent;
+
+      if (isInspectingLibraryPanel) {
+        objToStringify = libraryPanelToLegacyRepresentation(panel);
+        break;
       }
+
+      if (panel.parent instanceof VizPanelManager) {
+        objToStringify = panel.parent.getPanelSaveModel();
+        break;
+      }
+
+      if (gridItem instanceof DashboardGridItem) {
+        objToStringify = gridItemToPanel(gridItem);
+      }
+
       break;
     }
 
@@ -232,6 +257,51 @@ function getJsonText(show: ShowContent, panel: VizPanel): string {
   }
 
   return getPrettyJSON(objToStringify);
+}
+
+/**
+ *
+ * @param panel Must hold a LibraryPanel behavior
+ * @returns object representation of the legacy library panel structure.
+ */
+function libraryPanelToLegacyRepresentation(panel: VizPanel<{}, {}>) {
+  if (!isLibraryPanel(panel)) {
+    throw 'Panel not a library panel';
+  }
+
+  const gridItem = panel.parent;
+
+  if (!(gridItem instanceof DashboardGridItem)) {
+    throw 'LibraryPanel not child of DashboardGridItem';
+  }
+
+  const gridPos = {
+    x: gridItem.state.x || 0,
+    y: gridItem.state.y || 0,
+    h: gridItem.state.height || 0,
+    w: gridItem.state.width || 0,
+  };
+  const libraryPanelObj = vizPanelToLibraryPanel(panel);
+  const panelObj = vizPanelToPanel(panel.clone({ $behaviors: undefined }), gridPos, false, gridItem);
+
+  return { libraryPanel: { ...libraryPanelObj }, ...panelObj };
+}
+
+function vizPanelToLibraryPanel(panel: VizPanel): LibraryPanel {
+  if (!isLibraryPanel(panel)) {
+    throw new Error('Panel not a Library panel');
+  }
+
+  const libraryPanel = getLibraryPanelBehavior(panel);
+
+  if (!libraryPanel) {
+    throw new Error('Library panel behavior not found');
+  }
+
+  if (!libraryPanel.state._loadedPanel) {
+    throw new Error('Library panel not loaded');
+  }
+  return libraryPanel.state._loadedPanel;
 }
 
 function hasGridPosChanged(a: SceneGridItemStateLike, b: SceneGridItemStateLike) {

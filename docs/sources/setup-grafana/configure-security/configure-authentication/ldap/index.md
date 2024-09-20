@@ -88,10 +88,11 @@ port = 636
 use_ssl = true
 # If set to true, use LDAP with STARTTLS instead of LDAPS
 start_tls = false
-# The value of an accepted TLS cipher. By default, this value is empty. Example value: ["TLS_AES_256_GCM_SHA384"])
+# The value of an accepted TLS cipher. By default, this value is empty. Example value: ["TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"])
 # For a complete list of supported ciphers and TLS versions, refer to: https://go.dev/src/crypto/tls/cipher_suites.go
+# Starting with Grafana v11.0 only ciphers with ECDHE support are accepted for TLS 1.2 connections.
 tls_ciphers = []
-# This is the minimum TLS version allowed. By default, this value is empty. Accepted values are: TLS1.1, TLS1.2, TLS1.3.
+# This is the minimum TLS version allowed. By default, this value is empty. Accepted values are: TLS1.1 (only for Grafana v10.4 or earlier), TLS1.2, TLS1.3.
 min_tls_version = ""
 # set to true if you want to skip SSL cert validation
 ssl_skip_verify = false
@@ -151,19 +152,21 @@ Grafana has an LDAP debug view built-in which allows you to test your LDAP confi
 
 Within this view, you'll be able to see which LDAP servers are currently reachable and test your current configuration.
 
-{{< figure src="/static/img/docs/ldap_debug.png" class="docs-image--no-shadow" max-width="600px" >}}
+{{< figure src="/static/img/docs/ldap_debug.png" class="docs-image--no-shadow" max-width="600px" alt="LDAP testing" >}}
 
 To use the debug view, complete the following steps:
 
 1.  Type the username of a user that exists within any of your LDAP server(s)
 1.  Then, press "Run"
-1.  If the user is found within any of your LDAP instances, the mapping information is displayed
+1.  If the user is found within any of your LDAP instances, the mapping information is displayed.
 
-{{< figure src="/static/img/docs/ldap_debug_mapping_testing.png" class="docs-image--no-shadow" max-width="600px" >}}
+Note that this does not work if you are using the single bind configuration outlined below.
+
+{{< figure src="/static/img/docs/ldap_debug_mapping_testing.png" class="docs-image--no-shadow" max-width="600px" alt="LDAP mapping displayed" >}}
 
 [Grafana Enterprise]({{< relref "../../../../introduction/grafana-enterprise" >}}) users with [enhanced LDAP integration]({{< relref "../enhanced-ldap" >}}) enabled can also see sync status in the debug view. This requires the `ldap.status:read` permission.
 
-{{< figure src="/static/img/docs/ldap_sync_debug.png" class="docs-image--no-shadow" max-width="600px" >}}
+{{< figure src="/static/img/docs/ldap_sync_debug.png" class="docs-image--no-shadow" max-width="600px" alt="LDAP sync status" >}}
 
 ### Bind and bind password
 

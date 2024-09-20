@@ -1,5 +1,6 @@
+// Core Grafana history https://github.com/grafana/grafana/blob/v11.0.0-preview/public/app/plugins/datasource/prometheus/querybuilder/components/PromQueryBuilder.tsx
 import { css } from '@emotion/css';
-import React, { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import { DataSourceApi, PanelData } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
@@ -36,15 +37,12 @@ export interface PromQueryBuilderProps {
   showExplain: boolean;
 }
 
-// initial commit for hackathon-2023-08-promqail
-// AI/ML + Prometheus
-const prometheusPromQAIL = config.featureToggles.prometheusPromQAIL;
-
-export const PromQueryBuilder = React.memo<PromQueryBuilderProps>((props) => {
+export const PromQueryBuilder = memo<PromQueryBuilderProps>((props) => {
   const { datasource, query, onChange, onRunQuery, data, showExplain } = props;
   const [highlightedOp, setHighlightedOp] = useState<QueryBuilderOperation | undefined>();
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
   const [llmAppEnabled, updateLlmAppEnabled] = useState<boolean>(false);
+  const { prometheusPromQAIL } = config.featureToggles; // AI/ML + Prometheus
 
   const lang = { grammar: promqlGrammar, name: 'promql' };
 
@@ -55,8 +53,11 @@ export const PromQueryBuilder = React.memo<PromQueryBuilderProps>((props) => {
       const check = await isLLMPluginEnabled();
       updateLlmAppEnabled(check);
     }
-    checkLlms();
-  }, []);
+
+    if (prometheusPromQAIL) {
+      checkLlms();
+    }
+  }, [prometheusPromQAIL]);
 
   return (
     <>
@@ -74,8 +75,12 @@ export const PromQueryBuilder = React.memo<PromQueryBuilderProps>((props) => {
         <MetricsLabelsSection query={query} onChange={onChange} datasource={datasource} />
       </EditorRow>
       {initHints.length ? (
-        <div className="query-row-break">
-          <div className="prom-query-field-info text-warning">
+        <div
+          className={css({
+            flexBasis: '100%',
+          })}
+        >
+          <div className="text-warning">
             {initHints[0].label}{' '}
             {initHints[0].fix ? (
               <button type="button" className={'text-warning'}>

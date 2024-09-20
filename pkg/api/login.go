@@ -10,11 +10,12 @@ import (
 	"strings"
 
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/apimachinery/errutil"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/metrics"
 	"github.com/grafana/grafana/pkg/infra/network"
 	"github.com/grafana/grafana/pkg/middleware/cookies"
 	"github.com/grafana/grafana/pkg/services/auth"
-	"github.com/grafana/grafana/pkg/services/auth/identity"
 	"github.com/grafana/grafana/pkg/services/authn"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -23,7 +24,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/secrets"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/util"
-	"github.com/grafana/grafana/pkg/util/errutil"
 )
 
 const (
@@ -89,16 +89,14 @@ func (hs *HTTPServer) CookieOptionsFromCfg() cookies.CookieOptions {
 }
 
 func (hs *HTTPServer) LoginView(c *contextmodel.ReqContext) {
-	if hs.Features.IsEnabled(c.Req.Context(), featuremgmt.FlagClientTokenRotation) {
-		if errors.Is(c.LookupTokenErr, authn.ErrTokenNeedsRotation) {
-			c.Redirect(hs.Cfg.AppSubURL + "/")
-			return
-		}
+	if errors.Is(c.LookupTokenErr, authn.ErrTokenNeedsRotation) {
+		c.Redirect(hs.Cfg.AppSubURL + "/")
+		return
 	}
 
 	viewData, err := setIndexViewData(hs, c)
 	if err != nil {
-		c.Handle(hs.Cfg, 500, "Failed to get settings", err)
+		c.Handle(hs.Cfg, http.StatusInternalServerError, "Failed to get settings", err)
 		return
 	}
 
@@ -127,9 +125,10 @@ func (hs *HTTPServer) LoginView(c *contextmodel.ReqContext) {
 
 	if c.IsSignedIn {
 		// Assign login token to auth proxy users if enable_login_token = true
-		if hs.Cfg.AuthProxyEnabled &&
-			hs.Cfg.AuthProxyEnableLoginToken &&
-			c.SignedInUser.AuthenticatedBy == loginservice.AuthProxyAuthModule {
+		// LDAP users authenticated by auth proxy are also assigned login token but their auth module is LDAP
+		if hs.Cfg.AuthProxy.Enabled &&
+			hs.Cfg.AuthProxy.EnableLoginToken &&
+			c.SignedInUser.IsAuthenticatedBy(loginservice.AuthProxyAuthModule, loginservice.LDAPAuthModule) {
 			user := &user.User{ID: c.SignedInUser.UserID, Email: c.SignedInUser.Email, Login: c.SignedInUser.Login}
 			err := hs.loginUserWithUser(user, c)
 			if err != nil {
@@ -198,11 +197,11 @@ func (hs *HTTPServer) LoginAPIPing(c *contextmodel.ReqContext) response.Response
 		return response.JSON(http.StatusOK, util.DynMap{"message": "Logged in"})
 	}
 
-	return response.Error(401, "Unauthorized", nil)
+	return response.Error(http.StatusUnauthorized, "Unauthorized", nil)
 }
 
 func (hs *HTTPServer) LoginPost(c *contextmodel.ReqContext) response.Response {
-	identity, err := hs.authnService.Login(c.Req.Context(), authn.ClientForm, &authn.Request{HTTPRequest: c.Req, Resp: c.Resp})
+	identity, err := hs.authnService.Login(c.Req.Context(), authn.ClientForm, &authn.Request{HTTPRequest: c.Req})
 	if err != nil {
 		tokenErr := &auth.CreateTokenErr{}
 		if errors.As(err, &tokenErr) {
@@ -243,13 +242,7 @@ func (hs *HTTPServer) loginUserWithUser(user *user.User, c *contextmodel.ReqCont
 func (hs *HTTPServer) Logout(c *contextmodel.ReqContext) {
 	// FIXME: restructure saml client to implement authn.LogoutClient
 	if hs.samlSingleLogoutEnabled() {
-		id, err := identity.UserIdentifier(c.SignedInUser.GetNamespacedID())
-		if err != nil {
-			hs.log.Error("failed to retrieve user ID", "error", err)
-		}
-
-		authInfo, _ := hs.authInfoService.GetAuthInfo(c.Req.Context(), &loginservice.GetAuthInfoQuery{UserId: id})
-		if authInfo != nil && authInfo.AuthModule == loginservice.SAMLAuthModule {
+		if c.SignedInUser.GetAuthenticatedBy() == loginservice.SAMLAuthModule {
 			c.Redirect(hs.Cfg.AppSubURL + "/logout/saml")
 			return
 		}
@@ -261,10 +254,10 @@ func (hs *HTTPServer) Logout(c *contextmodel.ReqContext) {
 	if err != nil {
 		hs.log.Error("Failed perform proper logout", "error", err)
 		c.Redirect(hs.Cfg.AppSubURL + "/login")
+		return
 	}
 
-	_, id := c.SignedInUser.GetNamespacedID()
-	hs.log.Info("Successful Logout", "userID", id)
+	hs.log.Info("Successful Logout", "id", c.SignedInUser.GetID())
 	c.Redirect(redirect.URL)
 }
 
@@ -289,7 +282,7 @@ func (hs *HTTPServer) trySetEncryptedCookie(ctx *contextmodel.ReqContext, cookie
 		return err
 	}
 
-	cookies.WriteCookie(ctx.Resp, cookieName, hex.EncodeToString(encryptedError), 60, hs.CookieOptionsFromCfg)
+	cookies.WriteCookie(ctx.Resp, cookieName, hex.EncodeToString(encryptedError), maxAge, hs.CookieOptionsFromCfg)
 
 	return nil
 }
@@ -311,7 +304,7 @@ func (hs *HTTPServer) redirectURLWithErrorCookie(c *contextmodel.ReqContext, err
 		var userID int64
 		if c.SignedInUser != nil && !c.SignedInUser.IsNil() {
 			var errID error
-			userID, errID = identity.UserIdentifier(c.SignedInUser.GetNamespacedID())
+			userID, errID = identity.UserIdentifier(c.SignedInUser.GetID())
 			if errID != nil {
 				hs.log.Error("failed to retrieve user ID", "error", errID)
 			}
@@ -335,7 +328,7 @@ func (hs *HTTPServer) redirectURLWithErrorCookie(c *contextmodel.ReqContext, err
 }
 
 func (hs *HTTPServer) samlEnabled() bool {
-	return hs.SettingsProvider.KeyValue("auth.saml", "enabled").MustBool(false) && hs.License.FeatureEnabled("saml")
+	return hs.authnService.IsClientEnabled(authn.ClientSAML)
 }
 
 func (hs *HTTPServer) samlName() string {

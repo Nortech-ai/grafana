@@ -2,6 +2,7 @@ package pluginscdn
 
 import (
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/grafana/grafana/pkg/plugins/config"
@@ -16,10 +17,10 @@ var ErrPluginNotCDN = errors.New("plugin is not a cdn plugin")
 
 // Service provides methods for the plugins CDN.
 type Service struct {
-	cfg *config.Cfg
+	cfg *config.PluginManagementCfg
 }
 
-func ProvideService(cfg *config.Cfg) *Service {
+func ProvideService(cfg *config.PluginManagementCfg) *Service {
 	return &Service{cfg: cfg}
 }
 
@@ -61,4 +62,8 @@ func (s *Service) AssetURL(pluginID, pluginVersion, assetPath string) (string, e
 		return "", ErrPluginNotCDN
 	}
 	return s.NewCDNURLConstructor(pluginID, pluginVersion).StringPath(assetPath)
+}
+
+func JoinPath(base string, assetPath ...string) (string, error) {
+	return url.JoinPath(base, assetPath...)
 }

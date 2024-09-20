@@ -11,13 +11,13 @@ import {
   dateMath,
   DateTime,
   FieldType,
+  getDefaultTimeRange,
   MutableDataFrame,
   ScopedVars,
   urlUtil,
 } from '@grafana/data';
 import { NodeGraphOptions, SpanBarOptions } from '@grafana/o11y-ds-frontend';
 import { BackendSrvRequest, getBackendSrv, getTemplateSrv, TemplateSrv } from '@grafana/runtime';
-import { getTimeSrv, TimeSrv } from 'app/features/dashboard/services/TimeSrv';
 
 import { ALL_OPERATIONS_KEY } from './components/SearchForm';
 import { TraceIdTimeParamsOptions } from './configuration/TraceIdTimeParams';
@@ -39,7 +39,6 @@ export class JaegerDatasource extends DataSourceApi<JaegerQuery, JaegerJsonData>
   spanBar?: SpanBarOptions;
   constructor(
     private instanceSettings: DataSourceInstanceSettings<JaegerJsonData>,
-    private readonly timeSrv: TimeSrv = getTimeSrv(),
     private readonly templateSrv: TemplateSrv = getTemplateSrv()
   ) {
     super(instanceSettings);
@@ -67,7 +66,7 @@ export class JaegerDatasource extends DataSourceApi<JaegerQuery, JaegerJsonData>
 
     // Use the internal Jaeger /dependencies API for rendering the dependency graph.
     if (target.queryType === 'dependencyGraph') {
-      const timeRange = this.timeSrv.timeRange();
+      const timeRange = options.range ?? getDefaultTimeRange();
       const endTs = getTime(timeRange.to, true) / 1000;
       const lookback = endTs - getTime(timeRange.from, false) / 1000;
       return this._request('/api/dependencies', { endTs, lookback }).pipe(map(mapJaegerDependenciesResponse));
@@ -77,7 +76,7 @@ export class JaegerDatasource extends DataSourceApi<JaegerQuery, JaegerJsonData>
       return of({ error: { message: 'You must select a service.' }, data: [] });
     }
 
-    let { start, end } = this.getTimeRange();
+    let { start, end } = this.getTimeRange(options.range);
 
     if (target.queryType !== 'search' && target.query) {
       let url = `/api/traces/${encodeURIComponent(this.templateSrv.replace(target.query, options.scopedVars))}`;
@@ -144,7 +143,7 @@ export class JaegerDatasource extends DataSourceApi<JaegerQuery, JaegerJsonData>
     // TODO: this api is internal, used in jaeger ui. Officially they have gRPC api that should be used.
     return this._request(`/api/traces`, {
       ...jaegerQuery,
-      ...this.getTimeRange(),
+      ...this.getTimeRange(options.range),
       lookback: 'custom',
     }).pipe(
       map((response) => {
@@ -226,8 +225,7 @@ export class JaegerDatasource extends DataSourceApi<JaegerQuery, JaegerJsonData>
     );
   }
 
-  getTimeRange(): { start: number; end: number } {
-    const range = this.timeSrv.timeRange();
+  getTimeRange(range = getDefaultTimeRange()): { start: number; end: number } {
     return {
       start: getTime(range.from, false),
       end: getTime(range.to, true),

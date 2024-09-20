@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/grafana/grafana/pkg/api/dtos"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/metrics"
 	"github.com/grafana/grafana/pkg/kinds/librarypanel"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
-	"github.com/grafana/grafana/pkg/services/auth/identity"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/dashboards/dashboardaccess"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -21,6 +21,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/search"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
+	"github.com/grafana/grafana/pkg/services/sqlstore/searchstore"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
 )
@@ -137,25 +138,26 @@ func (l *LibraryElementService) createLibraryElement(c context.Context, signedIn
 		}
 	}
 
-	userID := int64(0)
-	namespaceID, identifier := signedInUser.GetNamespacedID()
-	switch namespaceID {
-	case identity.NamespaceUser, identity.NamespaceServiceAccount:
-		userID, err = identity.IntIdentifier(namespaceID, identifier)
-		if err != nil {
-			l.log.Warn("Error while parsing userID", "namespaceID", namespaceID, "userID", identifier)
-		}
+	var userID int64
+	if id, err := identity.UserIdentifier(signedInUser.GetID()); err == nil {
+		userID = id
 	}
 
 	metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
+	// folderUID *string will be changed to string
+	var folderUID = ""
+	if cmd.FolderUID != nil {
+		folderUID = *cmd.FolderUID
+	}
 	element := model.LibraryElement{
-		OrgID:    signedInUser.GetOrgID(),
-		FolderID: cmd.FolderID, // nolint:staticcheck
-		UID:      createUID,
-		Name:     cmd.Name,
-		Model:    updatedModel,
-		Version:  1,
-		Kind:     cmd.Kind,
+		OrgID:     signedInUser.GetOrgID(),
+		FolderID:  cmd.FolderID, // nolint:staticcheck
+		FolderUID: folderUID,
+		UID:       createUID,
+		Name:      cmd.Name,
+		Model:     updatedModel,
+		Version:   1,
+		Kind:      cmd.Kind,
 
 		Created: time.Now(),
 		Updated: time.Now(),
@@ -170,9 +172,9 @@ func (l *LibraryElementService) createLibraryElement(c context.Context, signedIn
 
 	err = l.SQLStore.WithTransactionalDbSession(c, func(session *db.Session) error {
 		if l.features.IsEnabled(c, featuremgmt.FlagLibraryPanelRBAC) {
-			allowed, err := l.AccessControl.Evaluate(c, signedInUser, ac.EvalPermission(ActionLibraryPanelsCreate, dashboards.ScopeFoldersProvider.GetResourceScopeUID(*cmd.FolderUID)))
+			allowed, err := l.AccessControl.Evaluate(c, signedInUser, ac.EvalPermission(ActionLibraryPanelsCreate, dashboards.ScopeFoldersProvider.GetResourceScopeUID(folderUID)))
 			if !allowed {
-				return fmt.Errorf("insufficient permissions for creating library panel in folder with UID %s", *cmd.FolderUID)
+				return fmt.Errorf("insufficient permissions for creating library panel in folder with UID %s", folderUID)
 			}
 			if err != nil {
 				return err
@@ -234,9 +236,12 @@ func (l *LibraryElementService) deleteLibraryElement(c context.Context, signedIn
 			return err
 		}
 		metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
-		// nolint:staticcheck
-		if err := l.requireEditPermissionsOnFolder(c, signedInUser, element.FolderID); err != nil {
-			return err
+
+		if !l.features.IsEnabled(c, featuremgmt.FlagLibraryPanelRBAC) {
+			// nolint:staticcheck
+			if err := l.requireEditPermissionsOnFolder(c, signedInUser, element.FolderID); err != nil {
+				return err
+			}
 		}
 
 		// Delete any hanging/invalid connections
@@ -283,7 +288,7 @@ func (l *LibraryElementService) getLibraryElements(c context.Context, store db.D
 		builder := db.NewSqlBuilder(cfg, features, store.GetDialect(), recursiveQueriesAreSupported)
 		builder.Write(selectLibraryElementDTOWithMeta)
 		builder.Write(", ? as folder_name ", cmd.FolderName)
-		builder.Write(", '' as folder_uid ")
+		builder.Write(", COALESCE((SELECT folder.uid FROM folder WHERE folder.id = le.folder_id), '') as folder_uid ")
 		builder.Write(getFromLibraryElementDTOWithMeta(store.GetDialect()))
 		metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
 		// nolint:staticcheck
@@ -295,7 +300,12 @@ func (l *LibraryElementService) getLibraryElements(c context.Context, store db.D
 		builder.Write(getFromLibraryElementDTOWithMeta(store.GetDialect()))
 		builder.Write(" INNER JOIN dashboard AS dashboard on le.folder_id = dashboard.id AND le.folder_id <> 0")
 		writeParamSelectorSQL(&builder, params...)
-		builder.WriteDashboardPermissionFilter(signedInUser, dashboardaccess.PERMISSION_VIEW, "")
+
+		// use permission filter if lib panel RBAC isn't enabled
+		if !l.features.IsEnabled(c, featuremgmt.FlagLibraryPanelRBAC) {
+			builder.WriteDashboardPermissionFilter(signedInUser, dashboardaccess.PERMISSION_VIEW, searchstore.TypeFolder)
+		}
+
 		builder.Write(` OR dashboard.id=0`)
 		if err := session.SQL(builder.GetSQLString(), builder.GetParams()...).Find(&libraryElements); err != nil {
 			return err
@@ -321,11 +331,15 @@ func (l *LibraryElementService) getLibraryElements(c context.Context, store db.D
 		}
 
 		metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
+		folderUID := libraryElement.FolderUID
+		if libraryElement.FolderID == 0 { // nolint:staticcheck
+			folderUID = ac.GeneralFolderUID
+		}
 		leDtos[i] = model.LibraryElementDTO{
 			ID:          libraryElement.ID,
 			OrgID:       libraryElement.OrgID,
 			FolderID:    libraryElement.FolderID, // nolint:staticcheck
-			FolderUID:   libraryElement.FolderUID,
+			FolderUID:   folderUID,
 			UID:         libraryElement.UID,
 			Name:        libraryElement.Name,
 			Kind:        libraryElement.Kind,
@@ -523,17 +537,20 @@ func (l *LibraryElementService) handleFolderIDPatches(ctx context.Context, eleme
 		toFolderID = fromFolderID
 	}
 
-	// FolderID was provided in the PATCH request
-	if toFolderID != -1 && toFolderID != fromFolderID {
-		if err := l.requireEditPermissionsOnFolder(ctx, user, toFolderID); err != nil {
+	if !l.features.IsEnabled(ctx, featuremgmt.FlagLibraryPanelRBAC) {
+		// FolderID was provided in the PATCH request
+		if toFolderID != -1 && toFolderID != fromFolderID {
+			if err := l.requireEditPermissionsOnFolder(ctx, user, toFolderID); err != nil {
+				return err
+			}
+		}
+
+		// Always check permissions for the folder where library element resides
+		if err := l.requireEditPermissionsOnFolder(ctx, user, fromFolderID); err != nil {
 			return err
 		}
 	}
 
-	// Always check permissions for the folder where library element resides
-	if err := l.requireEditPermissionsOnFolder(ctx, user, fromFolderID); err != nil {
-		return err
-	}
 	metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
 	// nolint:staticcheck
 	elementToPatch.FolderID = toFolderID
@@ -572,14 +589,8 @@ func (l *LibraryElementService) patchLibraryElement(c context.Context, signedInU
 		}
 
 		var userID int64
-		namespaceID, identifier := signedInUser.GetNamespacedID()
-		switch namespaceID {
-		case identity.NamespaceUser, identity.NamespaceServiceAccount:
-			var errID error
-			userID, errID = identity.IntIdentifier(namespaceID, identifier)
-			if errID != nil {
-				l.log.Warn("Error while parsing userID", "namespaceID", namespaceID, "userID", identifier, "err", errID)
-			}
+		if id, err := identity.UserIdentifier(signedInUser.GetID()); err == nil {
+			userID = id
 		}
 
 		metrics.MFolderIDsServiceCount.WithLabelValues(metrics.LibraryElements).Inc()
@@ -780,14 +791,9 @@ func (l *LibraryElementService) connectElementsToDashboardID(c context.Context, 
 				return err
 			}
 
-			namespaceID, identifier := signedInUser.GetNamespacedID()
-			userID := int64(0)
-			switch namespaceID {
-			case identity.NamespaceUser, identity.NamespaceServiceAccount:
-				userID, err = identity.IntIdentifier(namespaceID, identifier)
-				if err != nil {
-					l.log.Warn("Failed to parse user ID from namespace identifier", "namespace", namespaceID, "identifier", identifier, "error", err)
-				}
+			var userID int64
+			if id, err := identity.UserIdentifier(signedInUser.GetID()); err == nil {
+				userID = id
 			}
 
 			connection := model.LibraryElementConnection{

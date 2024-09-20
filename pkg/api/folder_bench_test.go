@@ -17,6 +17,7 @@ import (
 	"github.com/grafana/grafana/pkg/api/routing"
 	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/components/simplejson"
+	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/localcache"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
@@ -24,10 +25,12 @@ import (
 	"github.com/grafana/grafana/pkg/services/accesscontrol/acimpl"
 	acdb "github.com/grafana/grafana/pkg/services/accesscontrol/database"
 	"github.com/grafana/grafana/pkg/services/accesscontrol/ossaccesscontrol"
+	"github.com/grafana/grafana/pkg/services/accesscontrol/permreg"
+	"github.com/grafana/grafana/pkg/services/accesscontrol/resourcepermissions"
+	"github.com/grafana/grafana/pkg/services/authz/zanzana"
 	"github.com/grafana/grafana/pkg/services/contexthandler/ctxkey"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/dashboards"
-	"github.com/grafana/grafana/pkg/services/dashboards/dashboardaccess"
 	"github.com/grafana/grafana/pkg/services/dashboards/database"
 	dashboardservice "github.com/grafana/grafana/pkg/services/dashboards/service"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -41,12 +44,12 @@ import (
 	"github.com/grafana/grafana/pkg/services/star"
 	"github.com/grafana/grafana/pkg/services/star/startest"
 	"github.com/grafana/grafana/pkg/services/supportbundles/bundleregistry"
+	"github.com/grafana/grafana/pkg/services/supportbundles/supportbundlestest"
 	"github.com/grafana/grafana/pkg/services/tag/tagimpl"
 	"github.com/grafana/grafana/pkg/services/team"
 	"github.com/grafana/grafana/pkg/services/team/teamimpl"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/services/user/userimpl"
-	"github.com/grafana/grafana/pkg/services/user/usertest"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/web"
 	"github.com/grafana/grafana/pkg/web/webtest"
@@ -66,7 +69,7 @@ const (
 )
 
 type benchScenario struct {
-	db *sqlstore.SQLStore
+	db db.ReplDB
 	// signedInUser is the user that is signed in to the server
 	cfg          *setting.Cfg
 	signedInUser *user.SignedInUser
@@ -199,21 +202,23 @@ func BenchmarkFolderListAndSearch(b *testing.B) {
 
 func setupDB(b testing.TB) benchScenario {
 	b.Helper()
-	db := sqlstore.InitTestDB(b)
+	db, cfg := sqlstore.InitTestReplDB(b)
 	IDs := map[int64]struct{}{}
 
 	opts := sqlstore.NativeSettingsForDialect(db.GetDialect())
 
 	quotaService := quotatest.New(false, nil)
-	cfg := setting.NewCfg()
 
-	teamSvc, err := teamimpl.ProvideService(db, cfg)
+	teamSvc, err := teamimpl.ProvideService(db, cfg, tracing.InitializeTracerForTest())
 	require.NoError(b, err)
 	orgService, err := orgimpl.ProvideService(db, cfg, quotaService)
 	require.NoError(b, err)
 
 	cache := localcache.ProvideService()
-	userSvc, err := userimpl.ProvideService(db, orgService, cfg, teamSvc, cache, &quotatest.FakeQuotaService{}, bundleregistry.ProvideService())
+	userSvc, err := userimpl.ProvideService(
+		db, orgService, cfg, teamSvc, cache, tracing.InitializeTracerForTest(),
+		&quotatest.FakeQuotaService{}, bundleregistry.ProvideService(),
+	)
 	require.NoError(b, err)
 
 	var orgID int64 = 1
@@ -255,7 +260,7 @@ func setupDB(b testing.TB) benchScenario {
 				UserID:     userID,
 				TeamID:     teamID,
 				OrgID:      orgID,
-				Permission: dashboardaccess.PERMISSION_VIEW,
+				Permission: team.PermissionTypeMember,
 				Created:    now,
 				Updated:    now,
 			})
@@ -331,6 +336,7 @@ func setupDB(b testing.TB) benchScenario {
 				OrgID:     signedInUser.OrgID,
 				IsFolder:  false,
 				UID:       str,
+				FolderID:  f0.ID,
 				FolderUID: f0.UID,
 				Slug:      str,
 				Title:     str,
@@ -358,6 +364,7 @@ func setupDB(b testing.TB) benchScenario {
 					OrgID:     signedInUser.OrgID,
 					IsFolder:  false,
 					UID:       str,
+					FolderID:  f1.ID,
 					FolderUID: f1.UID,
 					Slug:      str,
 					Title:     str,
@@ -385,6 +392,7 @@ func setupDB(b testing.TB) benchScenario {
 						OrgID:     signedInUser.OrgID,
 						IsFolder:  false,
 						UID:       str,
+						FolderID:  f1.ID,
 						FolderUID: f2.UID,
 						Slug:      str,
 						Title:     str,
@@ -441,28 +449,32 @@ func setupServer(b testing.TB, sc benchScenario, features featuremgmt.FeatureTog
 	license := licensingtest.NewFakeLicensing()
 	license.On("FeatureEnabled", "accesscontrol.enforcement").Return(true).Maybe()
 
-	acSvc := acimpl.ProvideOSSService(sc.cfg, acdb.ProvideService(sc.db), localcache.ProvideService(), usertest.NewUserServiceFake(), features)
-
 	quotaSrv := quotatest.New(false, nil)
 
-	dashStore, err := database.ProvideDashboardStore(sc.db, sc.db.Cfg, features, tagimpl.ProvideService(sc.db), quotaSrv)
+	dashStore, err := database.ProvideDashboardStore(sc.db, sc.cfg, features, tagimpl.ProvideService(sc.db.DB()), quotaSrv)
 	require.NoError(b, err)
 
-	folderStore := folderimpl.ProvideDashboardFolderStore(sc.db)
+	folderStore := folderimpl.ProvideDashboardFolderStore(sc.db.DB())
 
-	ac := acimpl.ProvideAccessControl(sc.cfg)
-	folderServiceWithFlagOn := folderimpl.ProvideService(ac, bus.ProvideBus(tracing.InitializeTracerForTest()), sc.cfg, dashStore, folderStore, sc.db, features, nil)
+	ac := acimpl.ProvideAccessControl(featuremgmt.WithFeatures(), zanzana.NewNoopClient())
+	folderServiceWithFlagOn := folderimpl.ProvideService(ac, bus.ProvideBus(tracing.InitializeTracerForTest()), dashStore, folderStore, sc.db.DB(), features, supportbundlestest.NewFakeBundleService(), nil, tracing.InitializeTracerForTest())
 
 	cfg := setting.NewCfg()
+	actionSets := resourcepermissions.NewActionSetService(features)
+	acSvc := acimpl.ProvideOSSService(
+		sc.cfg, acdb.ProvideService(sc.db), actionSets, localcache.ProvideService(),
+		features, tracing.InitializeTracerForTest(), zanzana.NewNoopClient(), sc.db.DB(), permreg.ProvidePermissionRegistry(),
+	)
+
 	folderPermissions, err := ossaccesscontrol.ProvideFolderPermissions(
-		cfg, features, routing.NewRouteRegister(), sc.db, ac, license, &dashboards.FakeDashboardStore{}, folderServiceWithFlagOn, acSvc, sc.teamSvc, sc.userSvc)
+		cfg, features, routing.NewRouteRegister(), sc.db.DB(), ac, license, &dashboards.FakeDashboardStore{}, folderServiceWithFlagOn, acSvc, sc.teamSvc, sc.userSvc, actionSets)
 	require.NoError(b, err)
 	dashboardPermissions, err := ossaccesscontrol.ProvideDashboardPermissions(
-		cfg, features, routing.NewRouteRegister(), sc.db, ac, license, &dashboards.FakeDashboardStore{}, folderServiceWithFlagOn, acSvc, sc.teamSvc, sc.userSvc)
+		cfg, features, routing.NewRouteRegister(), sc.db.DB(), ac, license, &dashboards.FakeDashboardStore{}, folderServiceWithFlagOn, acSvc, sc.teamSvc, sc.userSvc, actionSets)
 	require.NoError(b, err)
 
 	dashboardSvc, err := dashboardservice.ProvideDashboardServiceImpl(
-		sc.cfg, dashStore, folderStore, nil,
+		sc.cfg, dashStore, folderStore,
 		features, folderPermissions, dashboardPermissions, ac,
 		folderServiceWithFlagOn, nil,
 	)
@@ -474,15 +486,15 @@ func setupServer(b testing.TB, sc benchScenario, features featuremgmt.FeatureTog
 	hs := &HTTPServer{
 		CacheService:     localcache.New(5*time.Minute, 10*time.Minute),
 		Cfg:              sc.cfg,
-		SQLStore:         sc.db,
+		SQLStore:         sc.db.DB(),
 		Features:         features,
 		QuotaService:     quotaSrv,
-		SearchService:    search.ProvideService(sc.cfg, sc.db, starSvc, dashboardSvc),
+		SearchService:    search.ProvideService(sc.cfg, sc.db.DB(), starSvc, dashboardSvc),
 		folderService:    folderServiceWithFlagOn,
 		DashboardService: dashboardSvc,
 	}
 
-	hs.AccessControl = acimpl.ProvideAccessControl(hs.Cfg)
+	hs.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures(), zanzana.NewNoopClient())
 	guardian.InitAccessControlGuardian(hs.Cfg, hs.AccessControl, hs.DashboardService)
 
 	m.Get("/api/folders", hs.GetFolders)
@@ -492,7 +504,7 @@ func setupServer(b testing.TB, sc benchScenario, features featuremgmt.FeatureTog
 }
 
 type f struct {
-	// ID          int64   `xorm:"pk autoincr 'id'"`
+	ID          int64   `xorm:"pk autoincr 'id'"`
 	OrgID       int64   `xorm:"org_id"`
 	UID         string  `xorm:"uid"`
 	ParentUID   *string `xorm:"parent_uid"`
@@ -509,8 +521,8 @@ func (f *f) TableName() string {
 
 // SQL bean helper to save tags
 type dashboardTag struct {
-	ID          int64
-	DashboardID int64
+	ID          int64 `xorm:"pk autoincr 'id'"`
+	DashboardID int64 `xorm:"dashboard_id"`
 	Term        string
 }
 
@@ -518,10 +530,10 @@ func addFolder(orgID int64, id int64, uid string, parentUID *string) (*f, *dashb
 	now := time.Now()
 	title := uid
 	f := &f{
-		OrgID: orgID,
-		UID:   uid,
-		Title: title,
-		// ID:        id,
+		OrgID:     orgID,
+		UID:       uid,
+		Title:     title,
+		ID:        id,
 		Created:   now,
 		Updated:   now,
 		ParentUID: parentUID,

@@ -1,7 +1,8 @@
 import { act, render, screen } from '@testing-library/react';
-import React, { useEffect, useRef, useState } from 'react';
+import userEvent from '@testing-library/user-event';
+import { useEffect, useRef, useState } from 'react';
 
-import { LogRowModel, dateTimeForTimeZone } from '@grafana/data';
+import { CoreApp, LogRowModel, dateTimeForTimeZone } from '@grafana/data';
 import { convertRawToRange } from '@grafana/data/src/datetime/rangeutil';
 import { config } from '@grafana/runtime';
 import { LogsSortOrder } from '@grafana/schema';
@@ -43,7 +44,7 @@ function ScrollWithWrapper({ children, ...props }: Props) {
   return (
     <div style={{ height: 40, overflowY: 'scroll' }} ref={scrollRef} data-testid="scroll-element">
       {initialized && (
-        <InfiniteScroll {...props} scrollElement={scrollRef.current!}>
+        <InfiniteScroll {...props} scrollElement={scrollRef.current!} topScrollEnabled>
           {children}
         </InfiniteScroll>
       )}
@@ -51,7 +52,13 @@ function ScrollWithWrapper({ children, ...props }: Props) {
   );
 }
 
-function setup(loadMoreMock: () => void, startPosition: number, rows: LogRowModel[], order: LogsSortOrder) {
+function setup(
+  loadMoreMock: () => void,
+  startPosition: number,
+  rows: LogRowModel[],
+  order: LogsSortOrder,
+  app?: CoreApp
+) {
   const { element, events } = getMockElement(startPosition);
 
   function scrollTo(position: number) {
@@ -60,8 +67,16 @@ function setup(loadMoreMock: () => void, startPosition: number, rows: LogRowMode
     act(() => {
       events['scroll'](new Event('scroll'));
     });
+
+    // When scrolling top, we wait for the user to reach the top, and then for a new scrolling event
+    // in the same direction before triggering a new query.
+    if (position === 0) {
+      wheel(-1);
+    }
   }
   function wheel(deltaY: number) {
+    element.scrollTop += deltaY;
+
     act(() => {
       const event = new WheelEvent('wheel', { deltaY });
       events['wheel'](event);
@@ -75,6 +90,8 @@ function setup(loadMoreMock: () => void, startPosition: number, rows: LogRowMode
       rows={rows}
       scrollElement={element as unknown as HTMLDivElement}
       loadMoreLogs={loadMoreMock}
+      topScrollEnabled
+      app={app}
     >
       <div data-testid="contents" style={{ height: 100 }} />
     </InfiniteScroll>
@@ -258,6 +275,28 @@ describe('InfiniteScroll', () => {
       });
     }
   );
+
+  describe('In Explore', () => {
+    test('Requests older logs from the oldest timestamp', async () => {
+      const loadMoreMock = jest.fn();
+      const rows = createLogRows(
+        absoluteRange.from + 2 * SCROLLING_THRESHOLD,
+        absoluteRange.to - 2 * SCROLLING_THRESHOLD
+      );
+      setup(loadMoreMock, 0, rows, LogsSortOrder.Ascending, CoreApp.Explore);
+
+      expect(await screen.findByTestId('contents')).toBeInTheDocument();
+
+      await screen.findByText('Older logs');
+
+      await userEvent.click(screen.getByText('Older logs'));
+
+      expect(loadMoreMock).toHaveBeenCalledWith({
+        from: absoluteRange.from,
+        to: rows[0].timeEpochMs,
+      });
+    });
+  });
 });
 
 function createLogRows(from: number, to: number) {
@@ -283,6 +322,7 @@ function getMockElement(scrollTop: number) {
     clientHeight: 40,
     scrollTop,
     scrollTo: jest.fn(),
+    scroll: jest.fn(),
   };
 
   return { element, events };

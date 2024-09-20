@@ -1,7 +1,7 @@
 import { map } from 'rxjs/operators';
 
 import { guessFieldTypeForField } from '../../dataframe/processDataFrame';
-import { getFieldDisplayName } from '../../field';
+import { getFieldDisplayName } from '../../field/fieldState';
 import { KeyValue } from '../../types/data';
 import { DataFrame, Field, FieldType } from '../../types/dataFrame';
 import { DataTransformerInfo, FieldMatcher, MatcherConfig } from '../../types/transformations';
@@ -64,7 +64,7 @@ export const reduceTransformer: DataTransformerInfo<ReduceTransformerOptions> = 
 /**
  * @internal only exported for testing
  */
-export function reduceSeriesToRows(
+function reduceSeriesToRows(
   data: DataFrame[],
   matcher: FieldMatcher,
   reducerId: ReducerID[],
@@ -122,7 +122,7 @@ export function reduceSeriesToRows(
       if (labelsToFields) {
         names[i] = field.name;
         if (field.labels) {
-          for (const key of Object.keys(field.labels)) {
+          for (const key in field.labels) {
             labels[key][i] = field.labels[key];
           }
         }
@@ -132,7 +132,12 @@ export function reduceSeriesToRows(
 
       for (const info of calculators) {
         const v = results[info.id];
-        calcs[info.id][i] = v;
+        if (v === null) {
+          // NaN ensures proper row index, null results in shift
+          calcs[info.id][i] = NaN;
+        } else {
+          calcs[info.id][i] = v;
+        }
       }
     }
 
@@ -156,7 +161,7 @@ export function reduceSeriesToRows(
   return mergeResults(processed);
 }
 
-export function getDistinctLabelKeys(frames: DataFrame[]): string[] {
+function getDistinctLabelKeys(frames: DataFrame[]): string[] {
   const keys = new Set<string>();
   for (const frame of frames) {
     for (const field of frame.fields) {
@@ -173,7 +178,7 @@ export function getDistinctLabelKeys(frames: DataFrame[]): string[] {
 /**
  * @internal only exported for testing
  */
-export function mergeResults(data: DataFrame[]): DataFrame | undefined {
+function mergeResults(data: DataFrame[]): DataFrame | undefined {
   if (!data?.length) {
     return undefined;
   }

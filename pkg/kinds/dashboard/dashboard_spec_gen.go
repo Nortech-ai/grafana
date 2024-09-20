@@ -94,6 +94,12 @@ const (
 	RowPanelTypeRow RowPanelType = "row"
 )
 
+// Defines values for SpecPanels0RepeatDirection.
+const (
+	SpecPanels0RepeatDirectionH SpecPanels0RepeatDirection = "h"
+	SpecPanels0RepeatDirectionV SpecPanels0RepeatDirection = "v"
+)
+
 // Defines values for SpecialValueMapType.
 const (
 	SpecialValueMapTypeRange   SpecialValueMapType = "range"
@@ -162,6 +168,7 @@ const (
 	VariableTypeGroupby    VariableType = "groupby"
 	VariableTypeInterval   VariableType = "interval"
 	VariableTypeQuery      VariableType = "query"
+	VariableTypeSnapshot   VariableType = "snapshot"
 	VariableTypeSystem     VariableType = "system"
 	VariableTypeTextbox    VariableType = "textbox"
 )
@@ -505,6 +512,9 @@ type MatcherConfig struct {
 
 // Dashboard panels are the basic visualization building blocks.
 type Panel struct {
+	// Sets panel queries cache timeout.
+	CacheTimeout *string `json:"cacheTimeout,omitempty"`
+
 	// Ref to a DataSource instance
 	Datasource *DataSourceRef `json:"datasource,omitempty"`
 
@@ -551,6 +561,9 @@ type Panel struct {
 
 	// The version of the plugin that is used for this panel. This is used to find the plugin to display the panel and to migrate old panel configs.
 	PluginVersion *string `json:"pluginVersion,omitempty"`
+
+	// Overrides the data source configured time-to-live for a query cache item in milliseconds
+	QueryCachingTTL *float32 `json:"queryCachingTTL,omitempty"`
 
 	// Name of template variable to repeat for.
 	Repeat *string `json:"repeat,omitempty"`
@@ -747,6 +760,9 @@ type Spec struct {
 	// List of dashboard panels
 	Panels []any `json:"panels,omitempty"`
 
+	// When set to true, the dashboard will load all panels in the dashboard when it's loaded.
+	Preload *bool `json:"preload,omitempty"`
+
 	// Refresh rate of dashboard. Represented via interval string, e.g. "5s", "1m", "1h", "1d".
 	Refresh *string `json:"refresh,omitempty"`
 
@@ -800,6 +816,10 @@ type Spec struct {
 	// Day when the week starts. Expressed by the name of the day in lowercase, e.g. "monday".
 	WeekStart *string `json:"weekStart,omitempty"`
 }
+
+// Direction to repeat in if 'repeat' is set.
+// `h` for horizontal, `v` for vertical.
+type SpecPanels0RepeatDirection string
 
 // Maps special values like Null, NaN (not a number), and boolean values like true and false to a display text and color.
 // See SpecialValueMatch to see the list of special values.

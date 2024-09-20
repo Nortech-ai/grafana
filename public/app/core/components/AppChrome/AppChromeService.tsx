@@ -183,13 +183,19 @@ export class AppChromeService {
   }
 
   public setKioskModeFromUrl(kiosk: UrlQueryValue) {
+    let newKioskMode: KioskMode | undefined;
+
     switch (kiosk) {
       case 'tv':
-        this.update({ kioskMode: KioskMode.TV });
+        newKioskMode = KioskMode.TV;
         break;
       case '1':
       case true:
-        this.update({ kioskMode: KioskMode.Full });
+        newKioskMode = KioskMode.Full;
+    }
+
+    if (newKioskMode && newKioskMode !== this.state.getValue().kioskMode) {
+      this.update({ kioskMode: newKioskMode });
     }
   }
 
@@ -208,7 +214,7 @@ export class AppChromeService {
     const { kioskMode, searchBarHidden } = this.state.getValue();
 
     if (searchBarHidden || kioskMode === KioskMode.TV) {
-      appEvents.emit(AppEvents.alertSuccess, [t('navigation.kiosk.tv-alert', 'Press ESC to exit kiosk mode')]);
+      appEvents.emit(AppEvents.alertInfo, [t('navigation.kiosk.tv-alert', 'Press ESC to exit kiosk mode')]);
       return KioskMode.Full;
     }
 

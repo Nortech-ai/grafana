@@ -1,45 +1,74 @@
 import { css } from '@emotion/css';
-import React from 'react';
+import { debounce } from 'lodash';
+import { useEffect } from 'react';
 
 import {
   DataSourceApi,
   DataSourceInstanceSettings,
   FieldConfigSource,
   GrafanaTheme2,
-  PanelModel,
   filterFieldConfigOverrides,
+  getDataSourceRef,
   isStandardFieldProp,
   restoreCustomOverrideRules,
 } from '@grafana/data';
 import { config, getDataSourceSrv, locationService } from '@grafana/runtime';
 import {
-  SceneObjectState,
-  VizPanel,
-  SceneObjectBase,
-  SceneComponentProps,
-  sceneUtils,
   DeepPartial,
-  SceneQueryRunner,
-  sceneGraph,
-  SceneDataProvider,
+  LocalValueVariable,
+  MultiValueVariable,
+  PanelBuilders,
+  SceneComponentProps,
   SceneDataTransformer,
+  SceneObjectBase,
+  SceneObjectRef,
+  SceneObjectState,
+  SceneObjectStateChangedEvent,
+  SceneQueryRunner,
+  SceneVariableSet,
+  SceneVariables,
+  VizPanel,
+  sceneGraph,
 } from '@grafana/scenes';
-import { DataQuery, DataTransformerConfig } from '@grafana/schema';
+import { DataQuery, DataTransformerConfig, Panel } from '@grafana/schema';
 import { useStyles2 } from '@grafana/ui';
-import { getPluginVersion } from 'app/features/dashboard/state/PanelModel';
 import { getLastUsedDatasourceFromStorage } from 'app/features/dashboard/utils/dashboard';
 import { storeLastUsedDataSourceInLocalStorage } from 'app/features/datasources/components/picker/utils';
+import { saveLibPanel } from 'app/features/library-panels/state/api';
 import { updateQueries } from 'app/features/query/state/updateQueries';
 import { GrafanaQuery } from 'app/plugins/datasource/grafana/types';
 import { QueryGroupOptions } from 'app/types';
 
+import { DashboardSceneChangeTracker } from '../saving/DashboardSceneChangeTracker';
+import { getPanelChanges } from '../saving/getDashboardChanges';
+import { DashboardGridItem, RepeatDirection } from '../scene/DashboardGridItem';
 import { PanelTimeRange, PanelTimeRangeState } from '../scene/PanelTimeRange';
-import { getDashboardSceneFor, getPanelIdForVizPanel, getQueryRunnerFor } from '../utils/utils';
+import { gridItemToPanel, vizPanelToPanel } from '../serialization/transformSceneToSaveModel';
+import {
+  getDashboardSceneFor,
+  getMultiVariableValues,
+  getPanelIdForVizPanel,
+  getQueryRunnerFor,
+  isLibraryPanel,
+} from '../utils/utils';
 
-interface VizPanelManagerState extends SceneObjectState {
+export interface VizPanelManagerState extends SceneObjectState {
   panel: VizPanel;
+  sourcePanel: SceneObjectRef<VizPanel>;
+  pluginId: string;
   datasource?: DataSourceApi;
   dsSettings?: DataSourceInstanceSettings;
+  tableView?: VizPanel;
+  repeat?: string;
+  repeatDirection?: RepeatDirection;
+  maxPerRow?: number;
+  isDirty?: boolean;
+}
+
+export enum DisplayMode {
+  Fill = 0,
+  Fit = 1,
+  Exact = 2,
 }
 
 // VizPanelManager serves as an API to manipulate VizPanel state from the outside. It allows panel type, options and  data manipulation.
@@ -49,15 +78,87 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
     { options: DeepPartial<{}>; fieldConfig: FieldConfigSource<DeepPartial<{}>> } | undefined
   > = {};
 
-  public constructor(panel: VizPanel) {
-    super({ panel });
-
+  public constructor(state: VizPanelManagerState) {
+    super(state);
     this.addActivationHandler(() => this._onActivate());
+  }
+
+  /**
+   * Will clone the source panel and move the data provider to
+   * live on the VizPanelManager level instead of the VizPanel level
+   */
+  public static createFor(sourcePanel: VizPanel) {
+    let repeatOptions: Pick<VizPanelManagerState, 'repeat' | 'repeatDirection' | 'maxPerRow'> = {};
+
+    const gridItem = sourcePanel.parent;
+
+    if (!(gridItem instanceof DashboardGridItem)) {
+      console.error('VizPanel is not a child of a dashboard grid item');
+      throw new Error('VizPanel is not a child of a dashboard grid item');
+    }
+
+    const { variableName: repeat, repeatDirection, maxPerRow } = gridItem.state;
+    repeatOptions = { repeat, repeatDirection, maxPerRow };
+
+    let variables: SceneVariables | undefined;
+
+    if (gridItem.parent?.state.$variables) {
+      variables = gridItem.parent.state.$variables.clone();
+    }
+
+    if (repeatOptions.repeat) {
+      const variable = sceneGraph.lookupVariable(repeatOptions.repeat, gridItem);
+
+      if (variable instanceof MultiValueVariable && variable.state.value.length) {
+        const { values, texts } = getMultiVariableValues(variable);
+
+        const varWithDefaultValue = new LocalValueVariable({
+          name: variable.state.name,
+          value: values[0],
+          text: String(texts[0]),
+        });
+
+        if (!variables) {
+          variables = new SceneVariableSet({
+            variables: [varWithDefaultValue],
+          });
+        } else {
+          variables.setState({ variables: [varWithDefaultValue] });
+        }
+      }
+    }
+
+    return new VizPanelManager({
+      $variables: variables,
+      panel: sourcePanel.clone(),
+      sourcePanel: sourcePanel.getRef(),
+      pluginId: sourcePanel.state.pluginId,
+      ...repeatOptions,
+    });
   }
 
   private _onActivate() {
     this.loadDataSource();
+    const changesSub = this.subscribeToEvent(SceneObjectStateChangedEvent, this._handleStateChange);
+
+    return () => {
+      changesSub.unsubscribe();
+    };
   }
+
+  private _detectPanelModelChanges = debounce(() => {
+    const { hasChanges } = getPanelChanges(
+      vizPanelToPanel(this.state.sourcePanel.resolve().clone({ $behaviors: undefined })),
+      vizPanelToPanel(this.state.panel.clone({ $behaviors: undefined }))
+    );
+    this.setState({ isDirty: hasChanges });
+  }, 250);
+
+  private _handleStateChange = (event: SceneObjectStateChangedEvent) => {
+    if (DashboardSceneChangeTracker.isUpdatingPersistedState(event)) {
+      this._detectPanelModelChanges();
+    }
+  };
 
   private async loadDataSource() {
     const dataObj = this.state.panel.state.$data;
@@ -68,15 +169,47 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
 
     let datasourceToLoad = this.queryRunner.state.datasource;
 
-    if (!datasourceToLoad) {
-      return;
-    }
-
     try {
-      // TODO: Handle default/last used datasource selection for new panel
-      // Ref: PanelEditorQueries / componentDidMount
-      const datasource = await getDataSourceSrv().get(datasourceToLoad);
-      const dsSettings = getDataSourceSrv().getInstanceSettings(datasourceToLoad);
+      let datasource: DataSourceApi | undefined;
+      let dsSettings: DataSourceInstanceSettings | undefined;
+
+      if (!datasourceToLoad) {
+        const dashboardScene = getDashboardSceneFor(this);
+        const dashboardUid = dashboardScene.state.uid ?? '';
+        const lastUsedDatasource = getLastUsedDatasourceFromStorage(dashboardUid!);
+
+        // do we have a last used datasource for this dashboard
+        if (lastUsedDatasource?.datasourceUid !== null) {
+          // get datasource from dashbopard uid
+          dsSettings = getDataSourceSrv().getInstanceSettings({ uid: lastUsedDatasource?.datasourceUid });
+          if (dsSettings) {
+            datasource = await getDataSourceSrv().get({
+              uid: lastUsedDatasource?.datasourceUid,
+              type: dsSettings.type,
+            });
+
+            this.queryRunner.setState({
+              datasource: {
+                ...getDataSourceRef(dsSettings),
+                uid: lastUsedDatasource?.datasourceUid,
+              },
+            });
+          }
+        }
+      } else {
+        datasource = await getDataSourceSrv().get(datasourceToLoad);
+        dsSettings = getDataSourceSrv().getInstanceSettings(datasourceToLoad);
+      }
+
+      if (datasource && dsSettings) {
+        this.setState({ datasource, dsSettings });
+
+        storeLastUsedDataSourceInLocalStorage(getDataSourceRef(dsSettings) || { default: true });
+      }
+    } catch (err) {
+      //set default datasource if we fail to load the datasource
+      const datasource = await getDataSourceSrv().get(config.defaultDatasource);
+      const dsSettings = getDataSourceSrv().getInstanceSettings(config.defaultDatasource);
 
       if (datasource && dsSettings) {
         this.setState({
@@ -84,57 +217,45 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
           dsSettings,
         });
 
-        storeLastUsedDataSourceInLocalStorage(
-          {
-            type: dsSettings.type,
-            uid: dsSettings.uid,
-          } || { default: true }
-        );
+        this.queryRunner.setState({
+          datasource: getDataSourceRef(dsSettings),
+        });
       }
-    } catch (err) {
+
       console.error(err);
     }
   }
 
-  public changePluginType(pluginType: string) {
-    const {
-      options: prevOptions,
-      fieldConfig: prevFieldConfig,
-      pluginId: prevPluginId,
-      ...restOfOldState
-    } = sceneUtils.cloneSceneObjectState(this.state.panel.state);
+  public changePluginType(pluginId: string) {
+    const { options: prevOptions, fieldConfig: prevFieldConfig, pluginId: prevPluginId } = this.state.panel.state;
 
     // clear custom options
-    let newFieldConfig = { ...prevFieldConfig };
-    newFieldConfig.defaults = {
-      ...newFieldConfig.defaults,
-      custom: {},
+    let newFieldConfig: FieldConfigSource = {
+      defaults: {
+        ...prevFieldConfig.defaults,
+        custom: {},
+      },
+      overrides: filterFieldConfigOverrides(prevFieldConfig.overrides, isStandardFieldProp),
     };
-    newFieldConfig.overrides = filterFieldConfigOverrides(newFieldConfig.overrides, isStandardFieldProp);
 
     this._cachedPluginOptions[prevPluginId] = { options: prevOptions, fieldConfig: prevFieldConfig };
-    const cachedOptions = this._cachedPluginOptions[pluginType]?.options;
-    const cachedFieldConfig = this._cachedPluginOptions[pluginType]?.fieldConfig;
+
+    const cachedOptions = this._cachedPluginOptions[pluginId]?.options;
+    const cachedFieldConfig = this._cachedPluginOptions[pluginId]?.fieldConfig;
+
     if (cachedFieldConfig) {
       newFieldConfig = restoreCustomOverrideRules(newFieldConfig, cachedFieldConfig);
     }
 
-    const newPanel = new VizPanel({
-      options: cachedOptions ?? {},
-      fieldConfig: newFieldConfig,
-      pluginId: pluginType,
-      ...restOfOldState,
-    });
-
     // When changing from non-data to data panel, we need to add a new data provider
-    if (!restOfOldState.$data && !config.panels[pluginType].skipDataQuery) {
+    if (!this.state.panel.state.$data && !config.panels[pluginId].skipDataQuery) {
       let ds = getLastUsedDatasourceFromStorage(getDashboardSceneFor(this).state.uid!)?.datasourceUid;
 
       if (!ds) {
         ds = config.defaultDatasource;
       }
 
-      newPanel.setState({
+      this.state.panel.setState({
         $data: new SceneDataTransformer({
           $data: new SceneQueryRunner({
             datasource: {
@@ -147,24 +268,9 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
       });
     }
 
-    const newPlugin = newPanel.getPlugin();
-    const panel: PanelModel = {
-      title: newPanel.state.title,
-      options: newPanel.state.options,
-      fieldConfig: newPanel.state.fieldConfig,
-      id: 1,
-      type: pluginType,
-    };
-    const newOptions = newPlugin?.onPanelTypeChanged?.(panel, prevPluginId, prevOptions, prevFieldConfig);
-    if (newOptions) {
-      newPanel.onOptionsChange(newOptions, true);
-    }
+    this.setState({ pluginId });
+    this.state.panel.changePluginType(pluginId, cachedOptions, newFieldConfig);
 
-    if (newPlugin?.onPanelMigration) {
-      newPanel.setState({ pluginVersion: getPluginVersion(newPlugin) });
-    }
-
-    this.setState({ panel: newPanel });
     this.loadDataSource();
   }
 
@@ -184,10 +290,7 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
     const queries = defaultQueries || (await updateQueries(nextDS, newSettings.uid, currentQueries, currentDS));
 
     queryRunner.setState({
-      datasource: {
-        type: newSettings.type,
-        uid: newSettings.uid,
-      },
+      datasource: getDataSourceRef(newSettings),
       queries,
     });
     if (defaultQueries) {
@@ -200,7 +303,7 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
   public changeQueryOptions(options: QueryGroupOptions) {
     const panelObj = this.state.panel;
     const dataObj = this.queryRunner;
-    let timeRangeObj = sceneGraph.getTimeRange(panelObj);
+    const timeRangeObj = panelObj.state.$timeRange;
 
     const dataObjStateUpdate: Partial<SceneQueryRunner['state']> = {};
     const timeRangeObjStateUpdate: Partial<PanelTimeRangeState> = {};
@@ -208,14 +311,17 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
     if (options.maxDataPoints !== dataObj.state.maxDataPoints) {
       dataObjStateUpdate.maxDataPoints = options.maxDataPoints ?? undefined;
     }
+
     if (options.minInterval !== dataObj.state.minInterval && options.minInterval !== null) {
       dataObjStateUpdate.minInterval = options.minInterval;
     }
+
     if (options.timeRange) {
       timeRangeObjStateUpdate.timeFrom = options.timeRange.from ?? undefined;
       timeRangeObjStateUpdate.timeShift = options.timeRange.shift ?? undefined;
       timeRangeObjStateUpdate.hideTimeOverride = options.timeRange.hide;
     }
+
     if (timeRangeObj instanceof PanelTimeRange) {
       if (timeRangeObjStateUpdate.timeFrom !== undefined || timeRangeObjStateUpdate.timeShift !== undefined) {
         // update time override
@@ -227,6 +333,14 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
     } else {
       // no time override present on the panel, let's create one first
       panelObj.setState({ $timeRange: new PanelTimeRange(timeRangeObjStateUpdate) });
+    }
+
+    if (options.cacheTimeout !== dataObj?.state.cacheTimeout) {
+      dataObjStateUpdate.cacheTimeout = options.cacheTimeout;
+    }
+
+    if (options.queryCachingTTL !== dataObj?.state.queryCachingTTL) {
+      dataObjStateUpdate.queryCachingTTL = options.queryCachingTTL;
     }
 
     dataObj.setState(dataObjStateUpdate);
@@ -261,6 +375,7 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
     if (!runner) {
       throw new Error('Query runner not found');
     }
+
     return runner;
   }
 
@@ -272,18 +387,108 @@ export class VizPanelManager extends SceneObjectBase<VizPanelManagerState> {
     return provider;
   }
 
-  get panelData(): SceneDataProvider {
-    return this.state.panel.state.$data!;
+  public toggleTableView() {
+    if (this.state.tableView) {
+      this.setState({ tableView: undefined });
+      return;
+    }
+
+    this.setState({
+      tableView: PanelBuilders.table()
+        .setTitle('')
+        .setOption('showTypeIcons', true)
+        .setOption('showHeader', true)
+        // Here we are breaking a scene rule and changing the parent of the main panel data provider
+        // But we need to share this same instance as the queries tab is subscribing to it
+        .setData(this.dataTransformer)
+        .build(),
+    });
+  }
+
+  public unlinkLibraryPanel() {
+    const sourcePanel = this.state.sourcePanel.resolve();
+    if (!isLibraryPanel(sourcePanel)) {
+      throw new Error('VizPanel is not a library panel');
+    }
+
+    const gridItem = sourcePanel.parent;
+
+    if (!(gridItem instanceof DashboardGridItem)) {
+      throw new Error('Library panel not a child of a grid item');
+    }
+
+    const newSourcePanel = this.state.panel.clone({ $data: sourcePanel.state.$data?.clone(), $behaviors: undefined });
+    gridItem.setState({
+      body: newSourcePanel,
+    });
+
+    this.state.panel.setState({ $behaviors: undefined });
+    this.setState({ sourcePanel: newSourcePanel.getRef() });
+  }
+
+  public commitChanges() {
+    const sourcePanel = this.state.sourcePanel.resolve();
+    this.commitChangesTo(sourcePanel);
+  }
+
+  public commitChangesTo(sourcePanel: VizPanel) {
+    const repeatUpdate = {
+      variableName: this.state.repeat,
+      repeatDirection: this.state.repeatDirection,
+      maxPerRow: this.state.maxPerRow,
+    };
+
+    const vizPanel = this.state.panel.clone();
+
+    if (sourcePanel.parent instanceof DashboardGridItem) {
+      sourcePanel.parent.setState({
+        ...repeatUpdate,
+        body: vizPanel,
+      });
+    }
+
+    if (isLibraryPanel(vizPanel)) {
+      saveLibPanel(vizPanel);
+    }
+  }
+
+  /**
+   * Used from inspect json tab to view the current persisted model
+   */
+  public getPanelSaveModel(): Panel | object {
+    const sourcePanel = this.state.sourcePanel.resolve();
+    const gridItem = sourcePanel.parent;
+
+    if (!(gridItem instanceof DashboardGridItem)) {
+      return { error: 'Unsupported panel parent' };
+    }
+
+    const parentClone = gridItem.clone({
+      body: this.state.panel.clone(),
+    });
+
+    return gridItemToPanel(parentClone);
+  }
+
+  public setPanelTitle(newTitle: string) {
+    this.state.panel.setState({ title: newTitle, hoverHeader: newTitle === '' });
   }
 
   public static Component = ({ model }: SceneComponentProps<VizPanelManager>) => {
-    const { panel } = model.useState();
+    const { panel, tableView } = model.useState();
     const styles = useStyles2(getStyles);
+    const panelToShow = tableView ?? panel;
+    const dataProvider = panelToShow.state.$data;
+
+    // This is to preserve SceneQueryRunner stays alive when switching between visualizations and table view
+    useEffect(() => {
+      return dataProvider?.activate();
+    }, [dataProvider]);
 
     return (
-      <div className={styles.wrapper}>
-        <panel.Component model={panel} />
-      </div>
+      <>
+        <div className={styles.wrapper}>{<panelToShow.Component model={panelToShow} />}</div>
+      </>
     );
   };
 }

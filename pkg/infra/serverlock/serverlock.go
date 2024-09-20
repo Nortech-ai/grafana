@@ -3,10 +3,13 @@ package serverlock
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -48,6 +51,7 @@ func (sl *ServerLockService) LockAndExecute(ctx context.Context, actionName stri
 	rowLock, err := sl.getOrCreate(ctx, actionName)
 	if err != nil {
 		span.RecordError(err)
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to getOrCreate serverlock: %v", err))
 		return err
 	}
 
@@ -60,6 +64,7 @@ func (sl *ServerLockService) LockAndExecute(ctx context.Context, actionName stri
 	acquiredLock, err := sl.acquireLock(ctx, rowLock)
 	if err != nil {
 		span.RecordError(err)
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to acquire serverlock: %v", err))
 		return err
 	}
 
@@ -147,6 +152,7 @@ func (sl *ServerLockService) LockExecuteAndRelease(ctx context.Context, actionNa
 	// could not get the lock, returning
 	if err != nil {
 		span.RecordError(err)
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to acquire serverlock: %v", err))
 		return err
 	}
 
@@ -155,6 +161,7 @@ func (sl *ServerLockService) LockExecuteAndRelease(ctx context.Context, actionNa
 	err = sl.releaseLock(ctx, actionName)
 	if err != nil {
 		span.RecordError(err)
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to release serverlock: %v", err))
 		ctxLogger.Error("Failed to release the lock", "error", err)
 	}
 
@@ -191,7 +198,8 @@ func (sl *ServerLockService) LockExecuteAndReleaseWithRetries(ctx context.Contex
 		// could not get the lock
 		if err != nil {
 			var lockedErr *ServerLockExistsError
-			if errors.As(err, &lockedErr) {
+			var deadlockErr *mysql.MySQLError
+			if errors.As(err, &lockedErr) || (errors.As(err, &deadlockErr) && deadlockErr.Number == 1213) {
 				// if the lock is already taken, wait and try again
 				if lockChecks == 1 { // only warn on first lock check
 					ctxLogger.Warn("another instance has the lock, waiting for it to be released", "actionName", actionName)
@@ -207,6 +215,7 @@ func (sl *ServerLockService) LockExecuteAndReleaseWithRetries(ctx context.Contex
 				continue
 			}
 			span.RecordError(err)
+			span.SetStatus(codes.Error, fmt.Sprintf("failed to acquire serverlock: %v", err))
 			return err
 		}
 
@@ -218,6 +227,7 @@ func (sl *ServerLockService) LockExecuteAndReleaseWithRetries(ctx context.Contex
 
 	if err := sl.releaseLock(ctx, actionName); err != nil {
 		span.RecordError(err)
+		span.SetStatus(codes.Error, fmt.Sprintf("failed to release serverlock: %v", err))
 		ctxLogger.Error("Failed to release the lock", "error", err)
 	}
 

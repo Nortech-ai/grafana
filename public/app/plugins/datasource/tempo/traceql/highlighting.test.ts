@@ -102,7 +102,7 @@ describe('Highlighting', () => {
       ['{span.http.status_code = 200} &&', 'Invalid spanset expression after spanset combining operator.'],
       [
         '{span.http.status_code = 200} && {span.http.status_code = 200} | foo() > 3',
-        'Invalid aggregation operator after pipepile operator.',
+        'Invalid aggregation operator after pipeline operator.',
       ],
       [
         '{span.http.status_code = 200} && {span.http.status_code = 200} | avg() > 3',
@@ -126,17 +126,17 @@ describe('Highlighting', () => {
       ['{.foo=1} | avg(.foo) > ', 'Invalid value after comparison operator.'],
       ['{.foo=1} | avg() < 1s', 'Invalid expression for aggregator operator.'],
       ['{.foo=1} | max() = 3', 'Invalid expression for aggregator operator.'],
-      ['{.foo=1} | by()', 'Invalid expression for aggregator operator.'],
-      ['{.foo=1} | select()', 'Invalid expression for aggregator operator.'],
+      ['{.foo=1} | by()', 'Invalid expression for by operator.'],
+      ['{.foo=1} | select()', 'Invalid expression for select operator.'],
       ['{foo}', 'Invalid expression for spanset.'],
       ['{.}', 'Invalid expression for spanset.'],
       ['{ resource. }', 'Invalid expression for spanset.'],
       ['{ span. }', 'Invalid expression for spanset.'],
       ['{.foo=}', 'Invalid value after comparison or arithmetic operator.'],
       ['{.foo="}', 'Invalid value after comparison or arithmetic operator.'],
-      ['{.foo=300} |', 'Invalid aggregation operator after pipepile operator.'],
-      ['{.foo=300} && {.bar=200} |', 'Invalid aggregation operator after pipepile operator.'],
-      ['{.foo=300} && {.bar=300} && {.foo=300} |', 'Invalid aggregation operator after pipepile operator.'],
+      ['{.foo=300} |', 'Invalid aggregation operator after pipeline operator.'],
+      ['{.foo=300} && {.bar=200} |', 'Invalid aggregation operator after pipeline operator.'],
+      ['{.foo=300} && {.bar=300} && {.foo=300} |', 'Invalid aggregation operator after pipeline operator.'],
       ['{.foo=300} | avg(.value)', 'Invalid comparison operator after aggregator operator.'],
       ['{.foo=300} && {.foo=300} | avg(.value)', 'Invalid comparison operator after aggregator operator.'],
       ['{.foo=300} | avg(.value) =', 'Invalid value after comparison operator.'],
@@ -170,6 +170,7 @@ describe('Highlighting', () => {
       ['{ span.s"tat"us" = "GET123 }'], // weird query, but technically valid
       ['{ duration = 123.456us}'],
       ['{ .foo = `GET` && .bar = `P\'O"S\\T` }'],
+      ['{ .foo = `GET` } | by(.foo, name)'],
     ])('valid query - %s', (query: string) => {
       expect(getErrorNodes(query)).toStrictEqual([]);
     });

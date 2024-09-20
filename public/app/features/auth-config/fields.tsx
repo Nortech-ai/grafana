@@ -1,30 +1,13 @@
-import React from 'react';
 import { validate as uuidValidate } from 'uuid';
 
+import { config } from '@grafana/runtime';
 import { TextLink } from '@grafana/ui';
 import { contextSrv } from 'app/core/core';
 
+import { ServerDiscoveryField } from './components/ServerDiscoveryField';
 import { FieldData, SSOProvider, SSOSettingsField } from './types';
 import { isSelectableValue } from './utils/guards';
-
-/** Map providers to their settings */
-export const fields: Record<SSOProvider['provider'], Array<keyof SSOProvider['settings']>> = {
-  github: ['name', 'clientId', 'clientSecret', 'teamIds', 'allowedOrganizations'],
-  google: ['name', 'clientId', 'clientSecret', 'allowedDomains'],
-  gitlab: ['name', 'clientId', 'clientSecret', 'allowedOrganizations', 'teamIds'],
-  azuread: ['name', 'clientId', 'clientSecret', 'authUrl', 'tokenUrl', 'scopes', 'allowedGroups', 'allowedDomains'],
-  okta: [
-    'name',
-    'clientId',
-    'clientSecret',
-    'authUrl',
-    'tokenUrl',
-    'apiUrl',
-    'roleAttributePath',
-    'allowedGroups',
-    'allowedDomains',
-  ],
-};
+import { isUrlValid } from './utils/url';
 
 type Section = Record<
   SSOProvider['provider'],
@@ -37,6 +20,44 @@ type Section = Record<
 >;
 
 export const sectionFields: Section = {
+  azuread: [
+    {
+      name: 'General settings',
+      id: 'general',
+      fields: [
+        'name',
+        'clientId',
+        'clientSecret',
+        'scopes',
+        'authUrl',
+        'tokenUrl',
+        'allowSignUp',
+        'autoLogin',
+        'signoutRedirectUrl',
+      ],
+    },
+    {
+      name: 'User mapping',
+      id: 'user',
+      fields: ['roleAttributeStrict', 'orgMapping', 'allowAssignGrafanaAdmin', 'skipOrgRoleSync'],
+    },
+    {
+      name: 'Extra security measures',
+      id: 'extra',
+      fields: [
+        'allowedOrganizations',
+        'allowedDomains',
+        'allowedGroups',
+        'forceUseGraphApi',
+        'usePkce',
+        'useRefreshToken',
+        'tlsSkipVerifyInsecure',
+        'tlsClientCert',
+        'tlsClientKey',
+        'tlsClientCa',
+      ],
+    },
+  ],
   generic_oauth: [
     {
       name: 'General settings',
@@ -47,6 +68,7 @@ export const sectionFields: Section = {
         'clientSecret',
         'authStyle',
         'scopes',
+        'serverDiscoveryUrl',
         'authUrl',
         'tokenUrl',
         'apiUrl',
@@ -66,6 +88,8 @@ export const sectionFields: Section = {
         'idTokenAttributeName',
         'roleAttributePath',
         'roleAttributeStrict',
+        'orgMapping',
+        'orgAttributePath',
         'allowAssignGrafanaAdmin',
         'skipOrgRoleSync',
       ],
@@ -85,12 +109,136 @@ export const sectionFields: Section = {
         { name: 'teamIdsAttributePath', dependsOn: 'defineAllowedTeamsIds' },
         'usePkce',
         'useRefreshToken',
+        'tlsSkipVerifyInsecure',
+        'tlsClientCert',
+        'tlsClientKey',
+        'tlsClientCa',
+      ],
+    },
+  ],
+  google: [
+    {
+      name: 'General settings',
+      id: 'general',
+      fields: ['name', 'clientId', 'clientSecret', 'scopes', 'allowSignUp', 'autoLogin', 'signoutRedirectUrl'],
+    },
+    {
+      name: 'User mapping',
+      id: 'user',
+      fields: ['roleAttributePath', 'roleAttributeStrict', 'orgMapping', 'allowAssignGrafanaAdmin', 'skipOrgRoleSync'],
+    },
+    {
+      name: 'Extra security measures',
+      id: 'extra',
+      fields: [
+        'validateHd',
+        'hostedDomain',
+        'allowedDomains',
+        'allowedGroups',
+        'usePkce',
+        'useRefreshToken',
+        'tlsSkipVerifyInsecure',
+        'tlsClientCert',
+        'tlsClientKey',
+        'tlsClientCa',
+      ],
+    },
+  ],
+  github: [
+    {
+      name: 'General settings',
+      id: 'general',
+      fields: ['name', 'clientId', 'clientSecret', 'scopes', 'allowSignUp', 'autoLogin', 'signoutRedirectUrl'],
+    },
+    {
+      name: 'User mapping',
+      id: 'user',
+      fields: ['roleAttributePath', 'roleAttributeStrict', 'orgMapping', 'allowAssignGrafanaAdmin', 'skipOrgRoleSync'],
+    },
+    {
+      name: 'Extra security measures',
+      id: 'extra',
+      fields: [
+        'allowedOrganizations',
+        'allowedDomains',
+        'teamIds',
+        'usePkce',
+        'useRefreshToken',
+        'tlsSkipVerifyInsecure',
+        'tlsClientCert',
+        'tlsClientKey',
+        'tlsClientCa',
+      ],
+    },
+  ],
+  gitlab: [
+    {
+      name: 'General settings',
+      id: 'general',
+      fields: ['name', 'clientId', 'clientSecret', 'scopes', 'allowSignUp', 'autoLogin', 'signoutRedirectUrl'],
+    },
+    {
+      name: 'User mapping',
+      id: 'user',
+      fields: ['roleAttributePath', 'roleAttributeStrict', 'orgMapping', 'allowAssignGrafanaAdmin', 'skipOrgRoleSync'],
+    },
+    {
+      name: 'Extra security measures',
+      id: 'extra',
+      fields: [
+        'allowedDomains',
+        'allowedGroups',
+        'usePkce',
+        'useRefreshToken',
+        'tlsSkipVerifyInsecure',
+        'tlsClientCert',
+        'tlsClientKey',
+        'tlsClientCa',
+      ],
+    },
+  ],
+  okta: [
+    {
+      name: 'General settings',
+      id: 'general',
+      fields: [
+        'name',
+        'clientId',
+        'clientSecret',
+        'scopes',
+        'authUrl',
+        'tokenUrl',
+        'apiUrl',
+        'allowSignUp',
+        'autoLogin',
+        'signoutRedirectUrl',
       ],
     },
     {
-      name: 'TLS',
-      id: 'tls',
-      fields: ['tlsSkipVerifyInsecure', 'tlsClientCert', 'tlsClientKey', 'tlsClientCa'],
+      name: 'User mapping',
+      id: 'user',
+      fields: [
+        'roleAttributePath',
+        'roleAttributeStrict',
+        'orgMapping',
+        'orgAttributePath',
+        'allowAssignGrafanaAdmin',
+        'skipOrgRoleSync',
+      ],
+    },
+    {
+      name: 'Extra security measures',
+      id: 'extra',
+      fields: [
+        'allowedDomains',
+        'allowedGroups',
+        'usePkce',
+        'useRefreshToken',
+        'tlsSkipVerifyInsecure',
+        'tlsClientCert',
+        'tlsClientKey',
+        'tlsClientCa',
+      ],
     },
   ],
 };
@@ -139,7 +287,11 @@ export function fieldMap(provider: string): Record<string, FieldData> {
       type: 'text',
       description: 'The authorization endpoint of your OAuth2 provider.',
       validation: {
-        required: false,
+        required: true,
+        validate: (value) => {
+          return isUrlValid(value);
+        },
+        message: 'This field is required and must be a valid URL.',
       },
     },
     authStyle: {
@@ -159,7 +311,11 @@ export function fieldMap(provider: string): Record<string, FieldData> {
       type: 'text',
       description: 'The token endpoint of your OAuth2 provider.',
       validation: {
-        required: false,
+        required: true,
+        validate: (value) => {
+          return isUrlValid(value);
+        },
+        message: 'This field is required and must be a valid URL.',
       },
     },
     scopes: {
@@ -214,6 +370,18 @@ export function fieldMap(provider: string): Record<string, FieldData> {
       ),
       validation: {
         required: false,
+        validate: (value) => {
+          if (typeof value !== 'string') {
+            return false;
+          }
+
+          if (value.length) {
+            return isUrlValid(value);
+          }
+
+          return true;
+        },
+        message: 'This field must be a valid URL if set.',
       },
     },
     roleAttributePath: {
@@ -291,6 +459,22 @@ export function fieldMap(provider: string): Record<string, FieldData> {
       description: 'Prevent synchronizing users’ organization roles from your IdP.',
       type: 'switch',
     },
+    orgMapping: {
+      label: 'Organization mapping',
+      description: orgMappingDescription(provider),
+      type: 'select',
+      hidden: !contextSrv.isGrafanaAdmin,
+      multi: true,
+      allowCustomValue: true,
+      options: [],
+      placeholder: 'Enter mappings (my-team:1:Viewer...) and press Enter to add',
+    },
+    orgAttributePath: {
+      label: 'Organization attribute path',
+      description: 'JMESPath expression to use for organization lookup.',
+      type: 'text',
+      hidden: !['generic_oauth', 'okta'].includes(provider),
+    },
     defineAllowedGroups: {
       label: 'Define allowed groups',
       type: 'switch',
@@ -298,6 +482,11 @@ export function fieldMap(provider: string): Record<string, FieldData> {
     defineAllowedTeamsIds: {
       label: 'Define allowed teams ids',
       type: 'switch',
+    },
+    forceUseGraphApi: {
+      label: 'Force use Graph API',
+      description: "If enabled, Grafana will fetch the users' groups using the Microsoft Graph API.",
+      type: 'checkbox',
     },
     usePkce: {
       label: 'Use PKCE',
@@ -322,16 +511,19 @@ export function fieldMap(provider: string): Record<string, FieldData> {
       label: 'TLS client ca',
       description: 'The file path to the trusted certificate authority list. Is not applicable on Grafana Cloud.',
       type: 'text',
+      hidden: !config.localFileSystemAvailable,
     },
     tlsClientCert: {
       label: 'TLS client cert',
       description: 'The file path to the certificate. Is not applicable on Grafana Cloud.',
       type: 'text',
+      hidden: !config.localFileSystemAvailable,
     },
     tlsClientKey: {
       label: 'TLS client key',
       description: 'The file path to the key. Is not applicable on Grafana Cloud.',
       type: 'text',
+      hidden: !config.localFileSystemAvailable,
     },
     tlsSkipVerifyInsecure: {
       label: 'TLS skip verify',
@@ -360,12 +552,17 @@ export function fieldMap(provider: string): Record<string, FieldData> {
       type: 'text',
       validation: {
         validate: (value, formValues) => {
+          let result = true;
           if (formValues.teamIds.length) {
-            return !!value;
+            result = !!value;
           }
-          return true;
+
+          if (typeof value === 'string' && value.length) {
+            result = isUrlValid(value);
+          }
+          return result;
         },
-        message: 'This field must be set if Team Ids are configured.',
+        message: 'This field must be set if Team Ids are configured and must be a valid URL.',
       },
     },
     teamIdsAttributePath: {
@@ -414,10 +611,44 @@ export function fieldMap(provider: string): Record<string, FieldData> {
             }
           : undefined,
     },
+    hostedDomain: {
+      label: 'Hosted domain',
+      description: 'The domain under which Grafana is hosted and accessible.',
+      type: 'text',
+    },
+    validateHd: {
+      label: 'Validate hosted domain',
+      description:
+        'If enabled, Grafana will match the Hosted Domain retrieved from the Google ID Token against the Allowed Domains list specified by the user.',
+      type: 'checkbox',
+    },
+    serverDiscoveryUrl: {
+      label: 'OpenID Connect Discovery URL',
+      description:
+        'The .well-known/openid-configuration endpoint for your IdP. The info extracted from this URL will be used to populate the Auth URL, Token URL and API URL fields.',
+      type: 'custom',
+      content: (setValue) => <ServerDiscoveryField setValue={setValue} />,
+    },
   };
 }
 
 // Check if a string contains only numeric values
 function isNumeric(value: string) {
   return /^-?\d+$/.test(value);
+}
+
+function orgMappingDescription(provider: string): string {
+  switch (provider) {
+    case 'azuread':
+      return 'List of "<GroupID>:<OrgIdOrName>:<Role>" mappings.';
+    case 'github':
+      return 'List of "<GitHubTeamName>:<OrgIdOrName>:<Role>" mappings.';
+    case 'gitlab':
+      return 'List of "<GitlabGroupName>:<OrgIdOrName>:<Role>';
+    case 'google':
+      return 'List of "<GoogleGroupName>:<OrgIdOrName>:<Role>';
+    default:
+      // Generic OAuth, Okta
+      return 'List of "<ExternalName>:<OrgIdOrName>:<Role>" mappings.';
+  }
 }

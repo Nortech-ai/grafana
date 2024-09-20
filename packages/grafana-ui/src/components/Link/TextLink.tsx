@@ -1,5 +1,5 @@
 import { css } from '@emotion/css';
-import React, { AnchorHTMLAttributes, forwardRef } from 'react';
+import { AnchorHTMLAttributes, forwardRef } from 'react';
 
 import { GrafanaTheme2, locationUtil, textUtil, ThemeTypographyVariantTypes } from '@grafana/data';
 
@@ -10,6 +10,8 @@ import { customWeight } from '../Text/utils';
 
 import { Link } from './Link';
 
+type TextLinkVariants = keyof Omit<ThemeTypographyVariantTypes, 'code'>;
+
 interface TextLinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'target' | 'rel'> {
   /** url to which redirect the user, external or internal */
   href: string;
@@ -19,17 +21,17 @@ interface TextLinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 't
   external?: boolean;
   /** True when the link will be displayed inline with surrounding text, false if it will be displayed as a block. Depending on this prop correspondant default styles will be applied */
   inline?: boolean;
-  /** The default variant is 'body'. To fit another styles set the correspondent variant as it is necessary also to adjust the icon size */
-  variant?: keyof ThemeTypographyVariantTypes;
+  /** The default variant is 'body'. To fit another styles set the correspondent variant as it is necessary also to adjust the icon size. `code` is excluded, as it is not fit for links. */
+  variant?: TextLinkVariants;
   /** Override the default weight for the used variant */
   weight?: 'light' | 'regular' | 'medium' | 'bold';
   /** Set the icon to be shown. An external link will show the 'external-link-alt' icon as default.*/
   icon?: IconName;
-  children: string;
+  children: React.ReactNode;
 }
 
 const svgSizes: {
-  [key in keyof ThemeTypographyVariantTypes]: IconSize;
+  [key in TextLinkVariants]: IconSize;
 } = {
   h1: 'xl',
   h2: 'xl',

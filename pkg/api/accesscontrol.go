@@ -9,6 +9,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/folder"
 	"github.com/grafana/grafana/pkg/services/libraryelements"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
@@ -390,7 +391,7 @@ func (hs *HTTPServer) declareFixedRoles() error {
 		Role: ac.RoleDTO{
 			Name:        "fixed:dashboards:creator",
 			DisplayName: "Creator",
-			Description: "Create dashboard in general folder.",
+			Description: "Create dashboards under the root folder.",
 			Group:       "Dashboards",
 			Permissions: []ac.Permission{
 				{Action: dashboards.ActionFoldersRead, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
@@ -434,13 +435,15 @@ func (hs *HTTPServer) declareFixedRoles() error {
 		Role: ac.RoleDTO{
 			Name:        "fixed:folders:creator",
 			DisplayName: "Creator",
-			Description: "Create folders.",
+			Description: "Create folders under root level",
 			Group:       "Folders",
 			Permissions: []ac.Permission{
-				{Action: dashboards.ActionFoldersCreate},
+				{Action: dashboards.ActionFoldersCreate, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(folder.GeneralFolderUID)},
 			},
 		},
 		Grants: []string{"Editor"},
+		// Don't grant fixed:folders:creator to Admin
+		Exclude: []string{"Admin"},
 	}
 
 	foldersReaderRole := ac.RoleRegistration{
@@ -457,6 +460,21 @@ func (hs *HTTPServer) declareFixedRoles() error {
 		Grants: []string{"Admin"},
 	}
 
+	// Needed to be able to list permissions on the general folder for viewers, doesn't actually grant access to any resources
+	generalFolderReaderRole := ac.RoleRegistration{
+		Role: ac.RoleDTO{
+			Name:        "fixed:folders.general:reader",
+			DisplayName: "General folder reader",
+			Description: "Access the general (root) folder.",
+			Group:       "Folders",
+			Hidden:      true,
+			Permissions: []ac.Permission{
+				{Action: dashboards.ActionFoldersRead, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
+			},
+		},
+		Grants: []string{string(org.RoleViewer)},
+	}
+
 	foldersWriterRole := ac.RoleRegistration{
 		Role: ac.RoleDTO{
 			Name:        "fixed:folders:writer",
@@ -466,7 +484,7 @@ func (hs *HTTPServer) declareFixedRoles() error {
 			Permissions: ac.ConcatPermissions(
 				foldersReaderRole.Role.Permissions,
 				[]ac.Permission{
-					{Action: dashboards.ActionFoldersCreate},
+					{Action: dashboards.ActionFoldersCreate, Scope: dashboards.ScopeFoldersAll},
 					{Action: dashboards.ActionFoldersWrite, Scope: dashboards.ScopeFoldersAll},
 					{Action: dashboards.ActionFoldersDelete, Scope: dashboards.ScopeFoldersAll},
 					{Action: dashboards.ActionDashboardsWrite, Scope: dashboards.ScopeFoldersAll},
@@ -483,7 +501,7 @@ func (hs *HTTPServer) declareFixedRoles() error {
 		Role: ac.RoleDTO{
 			Name:        "fixed:library.panels:creator",
 			DisplayName: "Creator",
-			Description: "Create library panel in general folder.",
+			Description: "Create library panel under the root folder.",
 			Group:       "Library panels",
 			Permissions: []ac.Permission{
 				{Action: dashboards.ActionFoldersRead, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
@@ -510,7 +528,7 @@ func (hs *HTTPServer) declareFixedRoles() error {
 		Role: ac.RoleDTO{
 			Name:        "fixed:library.panels:general.reader",
 			DisplayName: "General reader",
-			Description: "Read all library panels in general folder.",
+			Description: "Read all library panels under the root folder.",
 			Group:       "Library panels",
 			Permissions: []ac.Permission{
 				{Action: libraryelements.ActionLibraryPanelsRead, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
@@ -537,9 +555,9 @@ func (hs *HTTPServer) declareFixedRoles() error {
 	libraryPanelsGeneralWriterRole := ac.RoleRegistration{
 		Role: ac.RoleDTO{
 			Name:        "fixed:library.panels:general.writer",
-			DisplayName: "General writer",
+			DisplayName: "Root level writer",
 			Group:       "Library panels",
-			Description: "Create, read, write or delete all library panels and their permissions in the general folder.",
+			Description: "Create, read, write or delete all library panels and their permissions under the root folder.",
 			Permissions: ac.ConcatPermissions(libraryPanelsGeneralReaderRole.Role.Permissions, []ac.Permission{
 				{Action: libraryelements.ActionLibraryPanelsWrite, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
 				{Action: libraryelements.ActionLibraryPanelsDelete, Scope: dashboards.ScopeFoldersProvider.GetResourceScopeUID(ac.GeneralFolderUID)},
@@ -593,7 +611,7 @@ func (hs *HTTPServer) declareFixedRoles() error {
 		orgMaintainerRole, teamsCreatorRole, teamsWriterRole, teamsReaderRole, datasourcesExplorerRole,
 		annotationsReaderRole, dashboardAnnotationsWriterRole, annotationsWriterRole,
 		dashboardsCreatorRole, dashboardsReaderRole, dashboardsWriterRole,
-		foldersCreatorRole, foldersReaderRole, foldersWriterRole, apikeyReaderRole, apikeyWriterRole,
+		foldersCreatorRole, foldersReaderRole, generalFolderReaderRole, foldersWriterRole, apikeyReaderRole, apikeyWriterRole,
 		publicDashboardsWriterRole, featuremgmtReaderRole, featuremgmtWriterRole, libraryPanelsCreatorRole,
 		libraryPanelsReaderRole, libraryPanelsWriterRole, libraryPanelsGeneralReaderRole, libraryPanelsGeneralWriterRole}
 
@@ -639,7 +657,7 @@ func (hs *HTTPServer) declareFixedRoles() error {
 // Metadata helpers
 // getAccessControlMetadata returns the accesscontrol metadata associated with a given resource
 func (hs *HTTPServer) getAccessControlMetadata(c *contextmodel.ReqContext,
-	orgID int64, prefix string, resourceID string) ac.Metadata {
+	prefix string, resourceID string) ac.Metadata {
 	ids := map[string]bool{resourceID: true}
 	return hs.getMultiAccessControlMetadata(c, prefix, ids)[resourceID]
 }

@@ -1,6 +1,5 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import React from 'react';
 
 import {
   DataTransformerConfig,
@@ -174,7 +173,7 @@ const setupVizPanelManger = (panelId: string) => {
   const scene = transformSaveModelToScene({ dashboard: testDashboard as unknown as DashboardDataDTO, meta: {} });
   const panel = findVizPanelByKey(scene, panelId)!;
 
-  const vizPanelManager = new VizPanelManager(panel.clone());
+  const vizPanelManager = VizPanelManager.createFor(panel);
 
   // The following happens on DahsboardScene activation. For the needs of this test this activation aint needed hence we hand-call it
   // @ts-expect-error

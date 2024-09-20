@@ -1,11 +1,11 @@
 import { css } from '@emotion/css';
-import { intersectionBy, isEqual } from 'lodash';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAsyncFn } from 'react-use';
 
 import { GrafanaTheme2, UrlQueryMap } from '@grafana/data';
 import { Alert, LoadingPlaceholder, Stack, Tab, TabContent, TabsBar, useStyles2, withErrorBoundary } from '@grafana/ui';
 import { useQueryParams } from 'app/core/hooks/useQueryParams';
+import { useMuteTimings } from 'app/features/alerting/unified/components/mute-timings/useMuteTimings';
 import { ObjectMatcher, Route, RouteWithID } from 'app/plugins/datasource/alertmanager/types';
 import { useDispatch } from 'app/types';
 
@@ -16,7 +16,11 @@ import { useGetContactPointsState } from './api/receiversApi';
 import { AlertmanagerPageWrapper } from './components/AlertingPageWrapper';
 import { GrafanaAlertmanagerDeliveryWarning } from './components/GrafanaAlertmanagerDeliveryWarning';
 import { MuteTimingsTable } from './components/mute-timings/MuteTimingsTable';
-import { NotificationPoliciesFilter, findRoutesMatchingPredicate } from './components/notification-policies/Filters';
+import {
+  NotificationPoliciesFilter,
+  findRoutesByMatchers,
+  findRoutesMatchingPredicate,
+} from './components/notification-policies/Filters';
 import {
   useAddPolicyModal,
   useAlertGroupsModal,
@@ -30,10 +34,15 @@ import { updateAlertManagerConfigAction } from './state/actions';
 import { FormAmRoute } from './types/amroutes';
 import { useRouteGroupsMatcher } from './useRouteGroupsMatcher';
 import { addUniqueIdentifierToRoute } from './utils/amroutes';
-import { normalizeMatchers } from './utils/matchers';
 import { computeInheritedTree } from './utils/notification-policies';
 import { initialAsyncRequestState } from './utils/redux';
-import { addRouteToParentRoute, mergePartialAmRouteWithRouteTree, omitRouteFromRouteTree } from './utils/routeTree';
+import {
+  InsertPosition,
+  addRouteToReferenceRoute,
+  cleanRouteIDs,
+  mergePartialAmRouteWithRouteTree,
+  omitRouteFromRouteTree,
+} from './utils/routeTree';
 
 enum ActiveTab {
   NotificationPolicies = 'notification_policies',
@@ -56,6 +65,7 @@ const AmRoutes = () => {
 
   const { selectedAlertmanager, hasConfigurationAPI, isGrafanaAlertmanager } = useAlertmanager();
   const { getRouteGroupsMap } = useRouteGroupsMatcher();
+  const { data: muteTimings = [] } = useMuteTimings({ alertmanager: selectedAlertmanager ?? '' });
 
   const contactPointsState = useGetContactPointsState(selectedAlertmanager ?? '');
 
@@ -100,8 +110,14 @@ const AmRoutes = () => {
   // these are computed from the contactPoint and labels matchers filter
   const routesMatchingFilters = useMemo(() => {
     if (!rootRoute) {
-      return [];
+      const emptyResult: RoutesMatchingFilters = {
+        filtersApplied: false,
+        matchedRoutesWithPath: new Map(),
+      };
+
+      return emptyResult;
     }
+
     return findRoutesMatchingFilters(rootRoute, { contactPointFilter, labelMatchersFilter });
   }, [contactPointFilter, labelMatchersFilter, rootRoute]);
 
@@ -123,19 +139,28 @@ const AmRoutes = () => {
     updateRouteTree(newRouteTree);
   }
 
-  function handleAdd(partialRoute: Partial<FormAmRoute>, parentRoute: RouteWithID) {
+  function handleAdd(partialRoute: Partial<FormAmRoute>, referenceRoute: RouteWithID, insertPosition: InsertPosition) {
     if (!rootRoute) {
       return;
     }
 
-    const newRouteTree = addRouteToParentRoute(selectedAlertmanager ?? '', partialRoute, parentRoute, rootRoute);
+    const newRouteTree = addRouteToReferenceRoute(
+      selectedAlertmanager ?? '',
+      partialRoute,
+      referenceRoute,
+      rootRoute,
+      insertPosition
+    );
     updateRouteTree(newRouteTree);
   }
 
-  function updateRouteTree(routeTree: Route) {
+  function updateRouteTree(routeTree: Route | RouteWithID) {
     if (!result) {
       return;
     }
+
+    // make sure we omit all IDs from our routes
+    const newRouteTree = cleanRouteIDs(routeTree);
 
     setUpdatingTree(true);
 
@@ -145,7 +170,7 @@ const AmRoutes = () => {
           ...result,
           alertmanager_config: {
             ...result.alertmanager_config,
-            route: routeTree,
+            route: newRouteTree,
           },
         },
         oldConfig: result,
@@ -168,15 +193,14 @@ const AmRoutes = () => {
   }
 
   // edit, add, delete modals
-  const [addModal, openAddModal, closeAddModal] = useAddPolicyModal(receivers, handleAdd, updatingTree);
+  const [addModal, openAddModal, closeAddModal] = useAddPolicyModal(handleAdd, updatingTree);
   const [editModal, openEditModal, closeEditModal] = useEditPolicyModal(
     selectedAlertmanager ?? '',
-    receivers,
     handleSave,
     updatingTree
   );
   const [deleteModal, openDeleteModal, closeDeleteModal] = useDeletePolicyModal(handleDelete, updatingTree);
-  const [alertInstancesModal, showAlertGroupsModal] = useAlertGroupsModal();
+  const [alertInstancesModal, showAlertGroupsModal] = useAlertGroupsModal(selectedAlertmanager ?? '');
 
   useCleanup((state) => (state.unifiedAlerting.saveAMConfig = initialAsyncRequestState));
 
@@ -184,7 +208,7 @@ const AmRoutes = () => {
     return null;
   }
 
-  const numberOfMuteTimings = result?.alertmanager_config.mute_time_intervals?.length ?? 0;
+  const numberOfMuteTimings = muteTimings.length;
   const haveData = result && !resultError && !resultLoading;
   const isFetching = !result && resultLoading;
   const haveError = resultError && !resultLoading;
@@ -194,6 +218,7 @@ const AmRoutes = () => {
 
   return (
     <>
+      <GrafanaAlertmanagerDeliveryWarning currentAlertmanager={selectedAlertmanager} />
       <TabsBar>
         <Tab
           label={'Notification Policies'}
@@ -224,13 +249,12 @@ const AmRoutes = () => {
           <>
             {policyTreeTabActive && (
               <>
-                <GrafanaAlertmanagerDeliveryWarning currentAlertmanager={selectedAlertmanager} />
                 <Stack direction="column" gap={1}>
                   {rootRoute && (
                     <NotificationPoliciesFilter
-                      receivers={receivers}
                       onChangeMatchers={setLabelMatchersFilter}
                       onChangeReceiver={setContactPointFilter}
+                      matchingCount={routesMatchingFilters.matchedRoutesWithPath.size}
                     />
                   )}
                   {rootRoute && (
@@ -274,45 +298,89 @@ type RouteFilters = {
   labelMatchersFilter?: ObjectMatcher[];
 };
 
-export const findRoutesMatchingFilters = (rootRoute: RouteWithID, filters: RouteFilters): RouteWithID[] => {
+type FilterResult = Map<RouteWithID, RouteWithID[]>;
+
+export interface RoutesMatchingFilters {
+  filtersApplied: boolean;
+  matchedRoutesWithPath: FilterResult;
+}
+
+export const findRoutesMatchingFilters = (rootRoute: RouteWithID, filters: RouteFilters): RoutesMatchingFilters => {
   const { contactPointFilter, labelMatchersFilter = [] } = filters;
   const hasFilter = contactPointFilter || labelMatchersFilter.length > 0;
+  const havebothFilters = Boolean(contactPointFilter) && labelMatchersFilter.length > 0;
 
   // if filters are empty we short-circuit this function
   if (!hasFilter) {
-    return [];
+    return { filtersApplied: false, matchedRoutesWithPath: new Map() };
   }
 
-  let matchedRoutes: RouteWithID[][] = [];
+  // we'll collect all of the routes matching the filters
+  // we track an array of matching routes, each item in the array is for 1 type of filter
+  //
+  // [contactPointMatches, labelMatcherMatches] -> [[{ a: [], b: [] }], [{ a: [], c: [] }]]
+  // later we'll use intersection to find results in all sets of filter matchers
+  const matchedRoutes: RouteWithID[][] = [];
 
+  // compute fully inherited tree so all policies have their inherited receiver
   const fullRoute = computeInheritedTree(rootRoute);
 
-  const routesMatchingContactPoint = contactPointFilter
+  // find all routes for our contact point filter
+  const matchingRoutesForContactPoint = contactPointFilter
     ? findRoutesMatchingPredicate(fullRoute, (route) => route.receiver === contactPointFilter)
-    : undefined;
+    : new Map();
 
+  const routesMatchingContactPoint = Array.from(matchingRoutesForContactPoint.keys());
   if (routesMatchingContactPoint) {
     matchedRoutes.push(routesMatchingContactPoint);
   }
 
-  const routesMatchingLabelMatchers = labelMatchersFilter.length
-    ? findRoutesMatchingPredicate(fullRoute, (route) => {
-        const routeMatchers = normalizeMatchers(route);
-        return labelMatchersFilter.every((filter) => routeMatchers.some((matcher) => isEqual(filter, matcher)));
-      })
-    : undefined;
+  // find all routes matching our label matchers
+  const matchingRoutesForLabelMatchers = labelMatchersFilter.length
+    ? findRoutesMatchingPredicate(fullRoute, (route) => findRoutesByMatchers(route, labelMatchersFilter))
+    : new Map();
 
-  if (routesMatchingLabelMatchers) {
-    matchedRoutes.push(routesMatchingLabelMatchers);
+  const routesMatchingLabelFilters = Array.from(matchingRoutesForLabelMatchers.keys());
+  if (matchingRoutesForLabelMatchers.size > 0) {
+    matchedRoutes.push(routesMatchingLabelFilters);
   }
 
-  return intersectionBy(...matchedRoutes, 'id');
+  // now that we have our maps for all filters, we just need to find the intersection of all maps by route if we have both filters
+  const routesForAllFilterResults = havebothFilters
+    ? findMapIntersection(matchingRoutesForLabelMatchers, matchingRoutesForContactPoint)
+    : new Map([...matchingRoutesForLabelMatchers, ...matchingRoutesForContactPoint]);
+
+  return {
+    filtersApplied: true,
+    matchedRoutesWithPath: routesForAllFilterResults,
+  };
 };
 
+// this function takes multiple maps and creates a new map with routes that exist in all maps
+//
+// map 1: { a: [], b: [] }
+// map 2: { a: [], c: [] }
+// return: { a: [] }
+function findMapIntersection(...matchingRoutes: FilterResult[]): FilterResult {
+  const result = new Map<RouteWithID, RouteWithID[]>();
+
+  // Iterate through the keys of the first map'
+  for (const key of matchingRoutes[0].keys()) {
+    // Check if the key exists in all other maps
+    if (matchingRoutes.every((map) => map.has(key))) {
+      // If yes, add the key to the result map
+      // @ts-ignore
+      result.set(key, matchingRoutes[0].get(key));
+    }
+  }
+
+  return result;
+}
+
 const getStyles = (theme: GrafanaTheme2) => ({
-  tabContent: css`
-    margin-top: ${theme.spacing(2)};
-  `,
+  tabContent: css({
+    marginTop: theme.spacing(2),
+  }),
 });
 
 interface QueryParamValues {
@@ -322,11 +390,11 @@ interface QueryParamValues {
 function getActiveTabFromUrl(queryParams: UrlQueryMap): QueryParamValues {
   let tab = ActiveTab.NotificationPolicies; // default tab
 
-  if (queryParams['tab'] === ActiveTab.NotificationPolicies) {
+  if (queryParams.tab === ActiveTab.NotificationPolicies) {
     tab = ActiveTab.NotificationPolicies;
   }
 
-  if (queryParams['tab'] === ActiveTab.MuteTimings) {
+  if (queryParams.tab === ActiveTab.MuteTimings) {
     tab = ActiveTab.MuteTimings;
   }
 

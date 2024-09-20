@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { useAsync } from 'react-use';
 import { Subscription } from 'rxjs';
 
@@ -22,52 +22,63 @@ export enum StreamStatus {
 
 export const TIMEOUT = 10000;
 
-// TODO: Add tests
-export function useOpenAIStream(
-  model = DEFAULT_OAI_MODEL,
-  temperature = 1
-): {
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  setStopGeneration: React.Dispatch<React.SetStateAction<boolean>>;
+interface Options {
+  model: string;
+  temperature: number;
+  onResponse?: (response: string) => void;
+}
+
+const defaultOptions = {
+  model: DEFAULT_OAI_MODEL,
+  temperature: 1,
+};
+
+interface UseOpenAIStreamResponse {
+  setMessages: Dispatch<SetStateAction<Message[]>>;
+  stopGeneration: () => void;
   messages: Message[];
   reply: string;
   streamStatus: StreamStatus;
-  error: Error | undefined;
-  value:
-    | {
-        enabled: boolean | undefined;
-        stream?: undefined;
-      }
-    | {
-        enabled: boolean | undefined;
-        stream: Subscription;
-      }
-    | undefined;
-} {
+  error?: Error;
+  value?: {
+    enabled?: boolean | undefined;
+    stream?: Subscription;
+  };
+}
+
+// TODO: Add tests
+export function useOpenAIStream({ model, temperature, onResponse }: Options = defaultOptions): UseOpenAIStreamResponse {
   // The messages array to send to the LLM, updated when the button is clicked.
   const [messages, setMessages] = useState<Message[]>([]);
-  const [stopGeneration, setStopGeneration] = useState(false);
+
   // The latest reply from the LLM.
   const [reply, setReply] = useState('');
   const [streamStatus, setStreamStatus] = useState<StreamStatus>(StreamStatus.IDLE);
   const [error, setError] = useState<Error>();
   const { error: notifyError } = useAppNotification();
+  // Accumulate response and it will only update the state of the attatched component when the stream is completed.
+  let partialReply = '';
 
   const onError = useCallback(
     (e: Error) => {
       setStreamStatus(StreamStatus.IDLE);
       setMessages([]);
-      setStopGeneration(false);
       setError(e);
       notifyError(
         'Failed to generate content using OpenAI',
-        `Please try again or if the problem persists, contact your organization admin.`
+        'Please try again or if the problem persists, contact your organization admin.'
       );
       console.error(e);
       genAILogger.logError(e, { messages: JSON.stringify(messages), model, temperature: String(temperature) });
     },
     [messages, model, temperature, notifyError]
   );
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setReply('');
+    }
+  }, [messages]);
 
   const { error: enabledError, value: enabled } = useAsync(
     async () => await isLLMPluginEnabled(),
@@ -102,15 +113,15 @@ export function useOpenAIStream(
     return {
       enabled,
       stream: stream.subscribe({
-        next: setReply,
+        next: (reply) => {
+          partialReply = reply;
+        },
         error: onError,
         complete: () => {
+          setReply(partialReply);
           setStreamStatus(StreamStatus.COMPLETED);
-          setTimeout(() => {
-            setStreamStatus(StreamStatus.IDLE);
-          });
+          onResponse?.(partialReply);
           setMessages([]);
-          setStopGeneration(false);
           setError(undefined);
         },
       }),
@@ -120,22 +131,17 @@ export function useOpenAIStream(
   // Unsubscribe from the stream when the component unmounts.
   useEffect(() => {
     return () => {
-      if (value?.stream) {
-        value.stream.unsubscribe();
-      }
+      value?.stream?.unsubscribe();
     };
   }, [value]);
 
   // Unsubscribe from the stream when user stops the generation.
-  useEffect(() => {
-    if (stopGeneration) {
-      value?.stream?.unsubscribe();
-      setStreamStatus(StreamStatus.IDLE);
-      setStopGeneration(false);
-      setError(undefined);
-      setMessages([]);
-    }
-  }, [stopGeneration, value?.stream]);
+  const stopGeneration = useCallback(() => {
+    value?.stream?.unsubscribe();
+    setStreamStatus(StreamStatus.IDLE);
+    setError(undefined);
+    setMessages([]);
+  }, [value]);
 
   // If the stream is generating and we haven't received a reply, it times out.
   useEffect(() => {
@@ -145,8 +151,9 @@ export function useOpenAIStream(
         onError(new Error(`OpenAI stream timed out after ${TIMEOUT}ms`));
       }, TIMEOUT);
     }
+
     return () => {
-      timeout && clearTimeout(timeout);
+      clearTimeout(timeout);
     };
   }, [streamStatus, reply, onError]);
 
@@ -156,7 +163,7 @@ export function useOpenAIStream(
 
   return {
     setMessages,
-    setStopGeneration,
+    stopGeneration,
     messages,
     reply,
     streamStatus,

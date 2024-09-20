@@ -14,14 +14,15 @@
 
 import { css } from '@emotion/css';
 import cx from 'classnames';
+import { PropsWithChildren } from 'react';
 import * as React from 'react';
 
-import { GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2, TraceKeyValuePair } from '@grafana/data';
 import { Icon, useStyles2 } from '@grafana/ui';
 
 import { autoColor } from '../../Theme';
 import CopyIcon from '../../common/CopyIcon';
-import { TraceKeyValuePair, TraceLink, TNil } from '../../types';
+import { TraceLink, TNil } from '../../types';
 
 import jsonMarkup from './jsonMarkup';
 
@@ -47,7 +48,7 @@ export const getStyles = (theme: GrafanaTheme2) => {
     row: css`
       label: row;
       & > td {
-        padding: 0rem 0.5rem;
+        padding: 0.5rem 0.5rem;
         height: 30px;
       }
       &:nth-child(2n) > td {
@@ -62,6 +63,7 @@ export const getStyles = (theme: GrafanaTheme2) => {
       color: ${autoColor(theme, '#888')};
       white-space: pre;
       width: 125px;
+      vertical-align: top;
     `,
     copyColumn: css`
       label: copyColumn;
@@ -92,21 +94,23 @@ function parseIfComplexJson(value: unknown) {
   return value;
 }
 
-export const LinkValue = (props: { href: string; title?: string; children: React.ReactNode }) => {
+interface LinkValueProps {
+  href: string;
+  title?: string;
+  children: React.ReactNode;
+}
+
+export const LinkValue = ({ href, title = '', children }: PropsWithChildren<LinkValueProps>) => {
   return (
-    <a href={props.href} title={props.title} target="_blank" rel="noopener noreferrer">
-      {props.children} <Icon name="external-link-alt" />
+    <a href={href} title={title} target="_blank" rel="noopener noreferrer">
+      {children} <Icon name="external-link-alt" />
     </a>
   );
 };
 
-LinkValue.defaultProps = {
-  title: '',
-};
-
 export type KeyValuesTableProps = {
   data: TraceKeyValuePair[];
-  linksGetter: ((pairs: TraceKeyValuePair[], index: number) => TraceLink[]) | TNil;
+  linksGetter?: ((pairs: TraceKeyValuePair[], index: number) => TraceLink[]) | TNil;
 };
 
 export default function KeyValuesTable(props: KeyValuesTableProps) {

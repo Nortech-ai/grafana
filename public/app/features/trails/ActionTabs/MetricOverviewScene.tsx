@@ -1,28 +1,25 @@
-import React from 'react';
-
+import { PromMetricsMetadataItem } from '@grafana/prometheus';
 import {
   QueryVariable,
   SceneComponentProps,
-  SceneFlexItem,
   sceneGraph,
   SceneObjectBase,
   SceneObjectState,
   VariableDependencyConfig,
 } from '@grafana/scenes';
 import { Stack, Text, TextLink } from '@grafana/ui';
+import { Trans } from 'app/core/internationalization';
 
-import PrometheusLanguageProvider from '../../../plugins/datasource/prometheus/language_provider';
-import { PromMetricsMetadataItem } from '../../../plugins/datasource/prometheus/types';
-import { getDatasourceSrv } from '../../plugins/datasource_srv';
-import { ALL_VARIABLE_VALUE } from '../../variables/constants';
-import { TRAILS_ROUTE, VAR_DATASOURCE_EXPR, VAR_GROUP_BY } from '../shared';
-import { getMetricSceneFor } from '../utils';
-
-import { getLabelOptions } from './utils';
+import { getUnitFromMetric } from '../AutomaticMetricQueries/units';
+import { MetricScene } from '../MetricScene';
+import { StatusWrapper } from '../StatusWrapper';
+import { reportExploreMetrics } from '../interactions';
+import { VAR_DATASOURCE_EXPR, VAR_GROUP_BY } from '../shared';
+import { getMetricSceneFor, getTrailFor } from '../utils';
 
 export interface MetricOverviewSceneState extends SceneObjectState {
   metadata?: PromMetricsMetadataItem;
-  loading?: boolean;
+  metadataLoading?: boolean;
 }
 
 export class MetricOverviewScene extends SceneObjectBase<MetricOverviewSceneState> {
@@ -57,79 +54,99 @@ export class MetricOverviewScene extends SceneObjectBase<MetricOverviewSceneStat
   }
 
   private async updateMetadata() {
-    const ds = await getDatasourceSrv().get(VAR_DATASOURCE_EXPR, { __sceneObject: { value: this } });
-
-    const languageProvider: PrometheusLanguageProvider = ds.languageProvider;
-
-    if (!languageProvider) {
-      return;
-    }
-
+    this.setState({ metadataLoading: true, metadata: undefined });
     const metricScene = getMetricSceneFor(this);
     const metric = metricScene.state.metric;
 
-    if (languageProvider.metricsMetadata) {
-      this.setState({ metadata: languageProvider.metricsMetadata[metric] });
-      return;
-    }
-
-    await languageProvider.start();
-
-    this.setState({ metadata: languageProvider.metricsMetadata?.[metric] });
+    const trail = getTrailFor(this);
+    const metadata = await trail.getMetricMetadata(metric);
+    this.setState({ metadata, metadataLoading: false });
   }
 
   public static Component = ({ model }: SceneComponentProps<MetricOverviewScene>) => {
-    const { metadata } = model.useState();
+    const { metadata, metadataLoading } = model.useState();
     const variable = model.getVariable();
-    const { loading } = variable.useState();
-    const labelOptions = getLabelOptions(model, variable).filter((l) => l.value !== ALL_VARIABLE_VALUE);
+    const { loading: labelsLoading, options: labelOptions } = variable.useState();
 
+    const { useOtelExperience } = getTrailFor(model).useState();
+
+    // Get unit name from the metric name
+    const metricScene = getMetricSceneFor(model);
+    const metric = metricScene.state.metric;
+    let unit = getUnitFromMetric(metric) ?? 'Unknown';
     return (
-      <Stack gap={6}>
-        {loading ? (
-          <div>Loading...</div>
-        ) : (
+      <StatusWrapper isLoading={labelsLoading || metadataLoading}>
+        <Stack gap={6}>
           <>
             <Stack direction="column" gap={0.5}>
-              <Text weight={'medium'}>Description</Text>
+              <Text weight={'medium'}>
+                <Trans i18nKey="trails.metric-overview.description-label">Description</Trans>
+              </Text>
               <div style={{ maxWidth: 360 }}>
-                {metadata?.help ? <div>{metadata?.help}</div> : <i>No description available</i>}
+                {metadata?.help ? (
+                  <div>{metadata?.help}</div>
+                ) : (
+                  <i>
+                    <Trans i18nKey="trails.metric-overview.no-description">No description available</Trans>
+                  </i>
+                )}
               </div>
             </Stack>
             <Stack direction="column" gap={0.5}>
-              <Text weight={'medium'}>Type</Text>
-              {metadata?.type ? <div>{metadata?.type}</div> : <i>Unknown</i>}
+              <Text weight={'medium'}>
+                <Trans i18nKey="trails.metric-overview.type-label">Type</Trans>
+              </Text>
+              {metadata?.type ? (
+                <div>{metadata?.type}</div>
+              ) : (
+                <i>
+                  <Trans i18nKey="trails.metric-overview.unknown-type">Unknown</Trans>
+                </i>
+              )}
             </Stack>
             <Stack direction="column" gap={0.5}>
-              <Text weight={'medium'}>Unit</Text>
-              {metadata?.unit ? <div>{metadata?.unit}</div> : <i>Unknown</i>}
+              <Text weight={'medium'}>
+                <Trans i18nKey="trails.metric-overview.unit-label">Unit</Trans>
+              </Text>
+              {metadata?.unit ? <div>{metadata?.unit}</div> : <i>{unit}</i>}
             </Stack>
             <Stack direction="column" gap={0.5}>
-              <Text weight={'medium'}>Labels</Text>
+              <Text weight={'medium'}>
+                {useOtelExperience ? (
+                  <Trans i18nKey="trails.metric-overview.metric-attributes">Metric attributes</Trans>
+                ) : (
+                  <Trans i18nKey="trails.metric-overview.labels">Labels</Trans>
+                )}
+              </Text>
+              {labelOptions.length === 0 && 'Unable to fetch labels.'}
               {labelOptions.map((l) => (
                 <TextLink
                   key={l.label}
-                  href={sceneGraph.interpolate(
-                    model,
-                    `${TRAILS_ROUTE}$\{__url.params:exclude:actionView,var-groupby}&actionView=breakdown&var-groupby=${encodeURIComponent(
-                      l.value!
-                    )}`
-                  )}
-                  title="View breakdown"
+                  href={`#View breakdown for ${l.label}`}
+                  title={`View breakdown for ${l.label}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    sceneGraph.getAncestor(model, MetricScene).setActionView('breakdown');
+                    const groupByVar = sceneGraph.lookupVariable(VAR_GROUP_BY, model);
+                    if (groupByVar instanceof QueryVariable && l.label != null) {
+                      reportExploreMetrics('label_selected', { label: l.label, cause: 'overview_link' });
+                      groupByVar.setState({ value: l.value });
+                    }
+                    return false;
+                  }}
                 >
                   {l.label!}
                 </TextLink>
               ))}
             </Stack>
           </>
-        )}
-      </Stack>
+        </Stack>
+      </StatusWrapper>
     );
   };
 }
 
 export function buildMetricOverviewScene() {
-  return new SceneFlexItem({
-    body: new MetricOverviewScene({}),
-  });
+  return new MetricOverviewScene({});
 }

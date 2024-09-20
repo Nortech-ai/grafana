@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/grafana/grafana/pkg/services/accesscontrol/actest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -13,7 +14,7 @@ import (
 )
 
 type FakeServiceAccountStore struct {
-	ExpectedServiceAccountID                *serviceaccounts.ServiceAccount
+	ExpectedServiceAccountID                int64
 	ExpectedServiceAccountDTO               *serviceaccounts.ServiceAccountDTO
 	ExpectedServiceAccountProfileDTO        *serviceaccounts.ServiceAccountProfileDTO
 	ExpectedSearchServiceAccountQueryResult *serviceaccounts.SearchOrgServiceAccountsResult
@@ -38,7 +39,7 @@ func (f *FakeServiceAccountStore) RetrieveServiceAccount(ctx context.Context, or
 
 // RetrieveServiceAccountIdByName is a fake retrieving a service account id by name.
 func (f *FakeServiceAccountStore) RetrieveServiceAccountIdByName(ctx context.Context, orgID int64, name string) (int64, error) {
-	return f.ExpectedServiceAccountID.Id, f.ExpectedError
+	return f.ExpectedServiceAccountID, f.ExpectedError
 }
 
 // CreateServiceAccount is a fake creating a service account.
@@ -117,7 +118,8 @@ func (f *SecretsCheckerFake) CheckTokens(ctx context.Context) error {
 
 func TestProvideServiceAccount_DeleteServiceAccount(t *testing.T) {
 	storeMock := newServiceAccountStoreFake()
-	svc := ServiceAccountsService{storeMock, log.New("test"), log.New("background.test"), &SecretsCheckerFake{}, false, 0}
+	acSvc := actest.FakeService{}
+	svc := ServiceAccountsService{acSvc, storeMock, log.New("test"), log.New("background.test"), &SecretsCheckerFake{}, false, 0}
 	testOrgId := 1
 
 	t.Run("should create service account", func(t *testing.T) {

@@ -14,7 +14,6 @@ export interface DashboardInfo {
   dashboardUid: string;
   dashboardName: string;
   folderName?: string;
-  publicDashboardUid?: string;
 }
 
 /**
@@ -29,7 +28,7 @@ export interface DataRequestInfo extends Partial<DashboardInfo> {
   datasourceUid: string;
   datasourceType: string;
   panelId?: number;
-  panelPluginType?: string;
+  panelPluginId?: string;
   panelName?: string;
   duration: number;
   error?: string;

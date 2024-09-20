@@ -6,10 +6,8 @@ import 'file-saver';
 import 'jquery';
 import 'vendor/bootstrap/bootstrap';
 
-import 'app/features/all';
-
 import _ from 'lodash'; // eslint-disable-line lodash/import-scope
-import React from 'react';
+import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -36,13 +34,17 @@ import {
   setEmbeddedDashboard,
   setAppEvents,
   setReturnToPreviousHook,
-  type GetPluginExtensions,
+  setPluginExtensionsHook,
+  setPluginComponentHook,
+  setPluginComponentsHook,
+  setCurrentUser,
+  setChromeHeaderHeightHook,
+  setPluginLinksHook,
 } from '@grafana/runtime';
 import { setPanelDataErrorView } from '@grafana/runtime/src/components/PanelDataErrorView';
 import { setPanelRenderer } from '@grafana/runtime/src/components/PanelRenderer';
 import { setPluginPage } from '@grafana/runtime/src/components/PluginPage';
-import { getScrollbarWidth } from '@grafana/ui';
-import config from 'app/core/config';
+import config, { updateConfig } from 'app/core/config';
 import { arrayMove } from 'app/core/utils/arrayMove';
 import { getStandardTransformers } from 'app/features/transformers/standardTransformers';
 
@@ -53,11 +55,11 @@ import appEvents from './core/app_events';
 import { AppChromeService } from './core/components/AppChrome/AppChromeService';
 import { getAllOptionEditors, getAllStandardFieldConfigs } from './core/components/OptionsUI/registry';
 import { PluginPage } from './core/components/Page/PluginPage';
-import { GrafanaContextType, useReturnToPreviousInternal } from './core/context/GrafanaContext';
+import { GrafanaContextType, useChromeHeaderHeight, useReturnToPreviousInternal } from './core/context/GrafanaContext';
 import { initIconCache } from './core/icons/iconBundle';
 import { initializeI18n } from './core/internationalization';
+import { setMonacoEnv } from './core/monacoEnv';
 import { interceptLinkClicks } from './core/navigation/patch/interceptLinkClicks';
-import { ModalManager } from './core/services/ModalManager';
 import { NewFrontendAssetsChecker } from './core/services/NewFrontendAssetsChecker';
 import { backendSrv } from './core/services/backend_srv';
 import { contextSrv } from './core/services/context_srv';
@@ -80,14 +82,19 @@ import { initGrafanaLive } from './features/live';
 import { PanelDataErrorView } from './features/panel/components/PanelDataErrorView';
 import { PanelRenderer } from './features/panel/components/PanelRenderer';
 import { DatasourceSrv } from './features/plugins/datasource_srv';
-import { createPluginExtensionRegistry } from './features/plugins/extensions/createPluginExtensionRegistry';
-import { getCoreExtensionConfigurations } from './features/plugins/extensions/getCoreExtensionConfigurations';
-import { getPluginExtensions } from './features/plugins/extensions/getPluginExtensions';
+import { createPluginExtensionsGetter } from './features/plugins/extensions/getPluginExtensions';
+import { setupPluginExtensionRegistries } from './features/plugins/extensions/registry/setup';
+import { PluginExtensionRegistries } from './features/plugins/extensions/registry/types';
+import { usePluginComponent } from './features/plugins/extensions/usePluginComponent';
+import { usePluginComponents } from './features/plugins/extensions/usePluginComponents';
+import { createUsePluginExtensions } from './features/plugins/extensions/usePluginExtensions';
+import { usePluginLinks } from './features/plugins/extensions/usePluginLinks';
 import { importPanelPlugin, syncGetPanelPlugin } from './features/plugins/importPanelPlugin';
-import { PluginPreloadResult, preloadPlugins } from './features/plugins/pluginPreloader';
+import { preloadPlugins } from './features/plugins/pluginPreloader';
 import { QueryRunner } from './features/query/state/QueryRunner';
 import { runRequest } from './features/query/state/runRequest';
 import { initWindowRuntime } from './features/runtime/init';
+import { initializeScopes } from './features/scopes';
 import { cleanupOldExpandedFolders } from './features/search/utils';
 import { variableAdapters } from './features/variables/adapters';
 import { createAdHocVariableAdapter } from './features/variables/adhoc/adapter';
@@ -118,6 +125,7 @@ if (process.env.NODE_ENV === 'development') {
 
 export class GrafanaApp {
   context!: GrafanaContextType;
+  pluginExtensionsRegistries!: PluginExtensionRegistries;
 
   async init() {
     try {
@@ -125,13 +133,14 @@ export class GrafanaApp {
       parent.postMessage('GrafanaAppInit', '*');
 
       const initI18nPromise = initializeI18n(config.bootData.user.language);
+      initI18nPromise.then(({ language }) => updateConfig({ language }));
 
       setBackendSrv(backendSrv);
       initEchoSrv();
       initIconCache();
       // This needs to be done after the `initEchoSrv` since it is being used under the hood.
       startMeasure('frontend_app_init');
-      addClassIfNoOverlayScrollbar();
+
       setLocale(config.bootData.user.locale);
       setWeekStart(config.bootData.user.weekStart);
       setPanelRenderer(PanelRenderer);
@@ -141,6 +150,7 @@ export class GrafanaApp {
       setEmbeddedDashboard(EmbeddedDashboardLazy);
       setTimeZoneResolver(() => config.bootData.user.timezone);
       initGrafanaLive();
+      setCurrentUser(contextSrv.user);
 
       initAuthConfig();
 
@@ -170,7 +180,9 @@ export class GrafanaApp {
         createAdHocVariableAdapter(),
         createSystemVariableAdapter(),
       ]);
+
       monacoLanguageRegistry.setInit(getDefaultMonacoLanguages);
+      setMonacoEnv();
 
       setQueryRunnerFactory(() => new QueryRunner());
       setVariableQueryRunner(new VariableQueryRunner());
@@ -199,28 +211,25 @@ export class GrafanaApp {
       setDataSourceSrv(dataSourceSrv);
       initWindowRuntime();
 
-      // init modal manager
-      const modalManager = new ModalManager();
-      modalManager.init();
-
-      let preloadResults: PluginPreloadResult[] = [];
+      // Initialize plugin extensions
+      this.pluginExtensionsRegistries = setupPluginExtensionRegistries();
 
       if (contextSrv.user.orgRole !== '') {
-        // Preload selected app plugins
-        preloadResults = await preloadPlugins(config.apps);
+        // The "cloud-home-app" is registering banners once it's loaded, and this can cause a rerender in the AppChrome if it's loaded after the Grafana app init.
+        // TODO: remove the following exception once the issue mentioned above is fixed.
+        const awaitedAppPluginIds = ['cloud-home-app'];
+        const awaitedAppPlugins = Object.values(config.apps).filter((app) => awaitedAppPluginIds.includes(app.id));
+        const appPlugins = Object.values(config.apps).filter((app) => !awaitedAppPluginIds.includes(app.id));
+
+        preloadPlugins(appPlugins, this.pluginExtensionsRegistries);
+        await preloadPlugins(awaitedAppPlugins, this.pluginExtensionsRegistries, 'frontend_awaited_plugins_preload');
       }
 
-      // Create extension registry out of preloaded plugins and core extensions
-      const extensionRegistry = createPluginExtensionRegistry([
-        { pluginId: 'grafana', extensionConfigs: getCoreExtensionConfigurations() },
-        ...preloadResults,
-      ]);
-
-      // Expose the getPluginExtension function via grafana-runtime
-      const pluginExtensionGetter: GetPluginExtensions = (options) =>
-        getPluginExtensions({ ...options, registry: extensionRegistry });
-
-      setPluginExtensionGetter(pluginExtensionGetter);
+      setPluginExtensionGetter(createPluginExtensionsGetter(this.pluginExtensionsRegistries));
+      setPluginExtensionsHook(createUsePluginExtensions(this.pluginExtensionsRegistries));
+      setPluginLinksHook(usePluginLinks);
+      setPluginComponentHook(usePluginComponent);
+      setPluginComponentsHook(usePluginComponents);
 
       // initialize chrome service
       const queryParams = locationService.getSearchObject();
@@ -249,10 +258,13 @@ export class GrafanaApp {
       };
 
       setReturnToPreviousHook(useReturnToPreviousInternal);
+      setChromeHeaderHeightHook(useChromeHeaderHeight);
+
+      initializeScopes();
 
       const root = createRoot(document.getElementById('reactRoot')!);
       root.render(
-        React.createElement(AppWrapper, {
+        createElement(AppWrapper, {
           app: this,
         })
       );
@@ -355,12 +367,6 @@ function initEchoSrv() {
         endpointUrl: config.applicationInsightsEndpointUrl,
       })
     );
-  }
-}
-
-function addClassIfNoOverlayScrollbar() {
-  if (getScrollbarWidth() > 0) {
-    document.body.classList.add('no-overlay-scrollbar');
   }
 }
 

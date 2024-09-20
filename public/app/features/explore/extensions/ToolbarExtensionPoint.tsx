@@ -1,7 +1,7 @@
-import React, { lazy, ReactElement, Suspense, useMemo, useState } from 'react';
+import { lazy, ReactElement, Suspense, useMemo, useState } from 'react';
 
 import { type PluginExtensionLink, PluginExtensionPoints, RawTimeRange, getTimeZone } from '@grafana/data';
-import { getPluginLinkExtensions, config } from '@grafana/runtime';
+import { config, usePluginLinks } from '@grafana/runtime';
 import { DataQuery, TimeZone } from '@grafana/schema';
 import { Dropdown, ToolbarButton } from '@grafana/ui';
 import { contextSrv } from 'app/core/services/context_srv';
@@ -19,21 +19,24 @@ const AddToDashboard = lazy(() =>
 type Props = {
   exploreId: string;
   timeZone: TimeZone;
-  splitted: boolean;
 };
 
 export function ToolbarExtensionPoint(props: Props): ReactElement | null {
-  const { exploreId, splitted } = props;
+  const { exploreId } = props;
   const [selectedExtension, setSelectedExtension] = useState<PluginExtensionLink | undefined>();
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const context = useExtensionPointContext(props);
-  const extensions = useExtensionLinks(context);
+  const { links } = usePluginLinks({
+    extensionPointId: PluginExtensionPoints.ExploreToolbarAction,
+    context: context,
+    limitPerPlugin: 3,
+  });
   const selectExploreItem = getExploreItemSelector(exploreId);
   const noQueriesInPane = useSelector(selectExploreItem)?.queries?.length;
 
   // If we only have the explore core extension point registered we show the old way of
   // adding a query to a dashboard.
-  if (extensions.length <= 1) {
+  if (links.length <= 1) {
     const canAddPanelToDashboard =
       contextSrv.hasPermission(AccessControlAction.DashboardsCreate) ||
       contextSrv.hasPermission(AccessControlAction.DashboardsWrite);
@@ -49,19 +52,13 @@ export function ToolbarExtensionPoint(props: Props): ReactElement | null {
     );
   }
 
-  const menu = <ToolbarExtensionPointMenu extensions={extensions} onSelect={setSelectedExtension} />;
+  const menu = <ToolbarExtensionPointMenu extensions={links} onSelect={setSelectedExtension} />;
 
   return (
     <>
       <Dropdown onVisibleChange={setIsOpen} placement="bottom-start" overlay={menu}>
-        <ToolbarButton
-          aria-label="Add"
-          icon="plus"
-          disabled={!Boolean(noQueriesInPane)}
-          variant="canvas"
-          isOpen={isOpen}
-        >
-          {splitted ? ' ' : 'Add'}
+        <ToolbarButton aria-label="Add" disabled={!Boolean(noQueriesInPane)} variant="canvas" isOpen={isOpen}>
+          Add
         </ToolbarButton>
       </Dropdown>
       {!!selectedExtension && !!selectedExtension.path && (
@@ -120,16 +117,4 @@ function useExtensionPointContext(props: Props): PluginExtensionExploreContext {
     isLeftPane,
     numUniqueIds,
   ]);
-}
-
-function useExtensionLinks(context: PluginExtensionExploreContext): PluginExtensionLink[] {
-  return useMemo(() => {
-    const { extensions } = getPluginLinkExtensions({
-      extensionPointId: PluginExtensionPoints.ExploreToolbarAction,
-      context: context,
-      limitPerPlugin: 3,
-    });
-
-    return extensions;
-  }, [context]);
 }

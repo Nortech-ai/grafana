@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/grafana/grafana/pkg/api/routing"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
-	"github.com/grafana/grafana/pkg/services/auth/identity"
 	"github.com/grafana/grafana/pkg/services/datasourceproxy"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
@@ -17,7 +17,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert/backtesting"
 	"github.com/grafana/grafana/pkg/services/ngalert/eval"
 	"github.com/grafana/grafana/pkg/services/ngalert/metrics"
-	"github.com/grafana/grafana/pkg/services/ngalert/migration"
 	"github.com/grafana/grafana/pkg/services/ngalert/models"
 	"github.com/grafana/grafana/pkg/services/ngalert/notifier"
 	"github.com/grafana/grafana/pkg/services/ngalert/provisioning"
@@ -45,6 +44,8 @@ type RuleAccessControlService interface {
 	AuthorizeAccessToRuleGroup(ctx context.Context, user identity.Requester, rules models.RulesGroup) error
 	AuthorizeRuleChanges(ctx context.Context, user identity.Requester, change *store.GroupDelta) error
 	AuthorizeDatasourceAccessForRule(ctx context.Context, user identity.Requester, rule *models.AlertRule) error
+	AuthorizeDatasourceAccessForRuleGroup(ctx context.Context, user identity.Requester, rules models.RulesGroup) error
+	AuthorizeAccessInFolder(ctx context.Context, user identity.Requester, namespaced models.Namespaced) error
 }
 
 // API handlers.
@@ -57,7 +58,7 @@ type API struct {
 	TransactionManager   provisioning.TransactionManager
 	ProvenanceStore      provisioning.ProvisioningStore
 	RuleStore            RuleStore
-	AlertingStore        AlertingStore
+	AlertingStore        store.AlertingStore
 	AdminConfigStore     store.AdminConfigurationStore
 	DataProxy            *datasourceproxy.DataSourceProxyService
 	MultiOrgAlertmanager *notifier.MultiOrgAlertmanager
@@ -71,11 +72,11 @@ type API struct {
 	AlertRules           *provisioning.AlertRuleService
 	AlertsRouter         *sender.AlertsRouter
 	EvaluatorFactory     eval.EvaluatorFactory
+	ConditionValidator   *eval.ConditionValidator
 	FeatureManager       featuremgmt.FeatureToggles
 	Historian            Historian
 	Tracer               tracing.Tracer
 	AppUrl               *url.URL
-	UpgradeService       migration.UpgradeService
 
 	// Hooks can be used to replace API handlers for specific paths.
 	Hooks *Hooks
@@ -94,7 +95,21 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 	api.RegisterAlertmanagerApiEndpoints(NewForkingAM(
 		api.DatasourceCache,
 		NewLotexAM(proxy, logger),
-		&AlertmanagerSrv{crypto: api.MultiOrgAlertmanager.Crypto, log: logger, ac: api.AccessControl, mam: api.MultiOrgAlertmanager},
+		&AlertmanagerSrv{
+			crypto:         api.MultiOrgAlertmanager.Crypto,
+			log:            logger,
+			ac:             api.AccessControl,
+			mam:            api.MultiOrgAlertmanager,
+			featureManager: api.FeatureManager,
+			silenceSvc: notifier.NewSilenceService(
+				accesscontrol.NewSilenceService(api.AccessControl, api.RuleStore),
+				api.TransactionManager,
+				logger,
+				api.MultiOrgAlertmanager,
+				api.RuleStore,
+				ruleAuthzService,
+			),
+		},
 	), m)
 	// Register endpoints for proxying to Prometheus-compatible backends.
 	api.RegisterPrometheusApiEndpoints(NewForkingProm(
@@ -107,7 +122,7 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 		api.DatasourceCache,
 		NewLotexRuler(proxy, logger),
 		&RulerSrv{
-			conditionValidator: api.EvaluatorFactory,
+			conditionValidator: api.ConditionValidator,
 			QuotaService:       api.QuotaService,
 			store:              api.RuleStore,
 			provenanceStore:    api.ProvenanceStore,
@@ -115,6 +130,9 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 			log:                logger,
 			cfg:                &api.Cfg.UnifiedAlerting,
 			authz:              ruleAuthzService,
+			amConfigStore:      api.AlertingStore,
+			amRefresher:        api.MultiOrgAlertmanager,
+			featureManager:     api.FeatureManager,
 		},
 	), m)
 	api.RegisterTestingApiEndpoints(NewTestingApi(
@@ -137,6 +155,7 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 			store:                api.AdminConfigStore,
 			log:                  logger,
 			alertmanagerProvider: api.AlertsRouter,
+			featureManager:       api.FeatureManager,
 		},
 	), m)
 
@@ -147,6 +166,8 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 		templates:           api.Templates,
 		muteTimings:         api.MuteTimings,
 		alertRules:          api.AlertRules,
+		// XXX: Used to flag recording rules, remove when FT is removed
+		featureManager: api.FeatureManager,
 	}), m)
 
 	api.RegisterHistoryApiEndpoints(NewStateHistoryApi(&HistorySrv{
@@ -159,13 +180,4 @@ func (api *API) RegisterAPIEndpoints(m *metrics.API) {
 		receiverService:   api.ReceiverService,
 		muteTimingService: api.MuteTimings,
 	}), m)
-
-	// Inject upgrade endpoints if legacy alerting is enabled and the feature flag is enabled.
-	if !api.Cfg.UnifiedAlerting.IsEnabled() && api.FeatureManager.IsEnabledGlobally(featuremgmt.FlagAlertingPreviewUpgrade) {
-		api.RegisterUpgradeApiEndpoints(NewUpgradeApi(NewUpgradeSrc(
-			logger,
-			api.UpgradeService,
-			api.Cfg,
-		)), m)
-	}
 }

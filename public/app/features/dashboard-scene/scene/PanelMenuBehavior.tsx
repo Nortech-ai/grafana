@@ -1,47 +1,41 @@
 import {
+  getTimeZone,
   InterpolateFunction,
+  LinkModel,
   PanelMenuItem,
   PanelPlugin,
   PluginExtensionPanelContext,
   PluginExtensionPoints,
-  getTimeZone,
   urlUtil,
 } from '@grafana/data';
 import { config, getPluginLinkExtensions, locationService } from '@grafana/runtime';
-import {
-  LocalValueVariable,
-  SceneFlexLayout,
-  SceneGridLayout,
-  SceneGridRow,
-  SceneObject,
-  VizPanel,
-  VizPanelMenu,
-  sceneGraph,
-} from '@grafana/scenes';
+import { LocalValueVariable, sceneGraph, SceneGridRow, VizPanel, VizPanelMenu } from '@grafana/scenes';
 import { DataQuery, OptionsWithLegend } from '@grafana/schema';
 import appEvents from 'app/core/app_events';
 import { t } from 'app/core/internationalization';
+import { contextSrv } from 'app/core/services/context_srv';
 import { scenesPanelToRuleFormValues } from 'app/features/alerting/unified/utils/rule-form';
 import { shareDashboardType } from 'app/features/dashboard/components/ShareModal/utils';
 import { InspectTab } from 'app/features/inspector/types';
 import { getScenePanelLinksSupplier } from 'app/features/panel/panellinks/linkSuppliers';
 import { createExtensionSubMenu } from 'app/features/plugins/extensions/utils';
-import { addDataTrailPanelAction } from 'app/features/trails/dashboardIntegration';
+import { addDataTrailPanelAction } from 'app/features/trails/Integrations/dashboardIntegration';
 import { ShowConfirmModalEvent } from 'app/types/events';
 
+import { ShareDrawer } from '../sharing/ShareDrawer/ShareDrawer';
 import { ShareModal } from '../sharing/ShareModal';
 import { DashboardInteractions } from '../utils/interactions';
 import { getEditPanelUrl, getInspectUrl, getViewPanelUrl, tryGetExploreUrlForPanel } from '../utils/urlBuilders';
-import { getDashboardSceneFor, getPanelIdForVizPanel, getQueryRunnerFor } from '../utils/utils';
+import { getDashboardSceneFor, getPanelIdForVizPanel, getQueryRunnerFor, isLibraryPanel } from '../utils/utils';
 
 import { DashboardScene } from './DashboardScene';
-import { LibraryVizPanel } from './LibraryVizPanel';
 import { VizPanelLinks, VizPanelLinksMenu } from './PanelLinks';
+import { UnlinkLibraryPanelModal } from './UnlinkLibraryPanelModal';
 
 /**
  * Behavior is called when VizPanelMenu is activated (ie when it's opened).
  */
-export function panelMenuBehavior(menu: VizPanelMenu) {
+export function panelMenuBehavior(menu: VizPanelMenu, isRepeat = false) {
   const asyncFunc = async () => {
     // hm.. add another generic param to SceneObject to specify parent type?
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
@@ -50,7 +44,6 @@ export function panelMenuBehavior(menu: VizPanelMenu) {
 
     const items: PanelMenuItem[] = [];
     const moreSubMenu: PanelMenuItem[] = [];
-    const panelId = getPanelIdForVizPanel(panel);
     const dashboard = getDashboardSceneFor(panel);
     const { isEmbedded } = dashboard.state.meta;
     const exploreMenuItem = await getExploreMenuItem(panel);
@@ -63,81 +56,176 @@ export function panelMenuBehavior(menu: VizPanelMenu) {
       return;
     }
 
-    items.push({
-      text: t('panel.header-menu.view', `View`),
-      iconClassName: 'eye',
-      shortcut: 'v',
-      onClick: () => DashboardInteractions.panelMenuItemClicked('view'),
-      href: getViewPanelUrl(panel),
-    });
+    const isEditingPanel = Boolean(dashboard.state.editPanel);
+    if (!isEditingPanel) {
+      items.push({
+        text: t('panel.header-menu.view', `View`),
+        iconClassName: 'eye',
+        shortcut: 'v',
+        href: getViewPanelUrl(panel),
+      });
+    }
 
-    if (dashboard.canEditDashboard()) {
+    if (dashboard.canEditDashboard() && dashboard.state.editable && !isRepeat && !isEditingPanel) {
       // We could check isEditing here but I kind of think this should always be in the menu,
       // and going into panel edit should make the dashboard go into edit mode is it's not already
       items.push({
         text: t('panel.header-menu.edit', `Edit`),
-        iconClassName: 'eye',
+        iconClassName: 'edit',
         shortcut: 'e',
-        onClick: () => DashboardInteractions.panelMenuItemClicked('edit'),
-        href: getEditPanelUrl(panelId),
+        href: getEditPanelUrl(getPanelIdForVizPanel(panel)),
       });
     }
 
-    items.push({
-      text: t('panel.header-menu.share', `Share`),
-      iconClassName: 'share-alt',
-      onClick: () => {
-        DashboardInteractions.panelMenuItemClicked('share');
-        dashboard.showModal(new ShareModal({ panelRef: panel.getRef(), dashboardRef: dashboard.getRef() }));
-      },
-      shortcut: 'p s',
-    });
-
-    moreSubMenu.push({
-      text: t('panel.header-menu.duplicate', `Duplicate`),
-      onClick: () => {
-        DashboardInteractions.panelMenuItemClicked('duplicate');
-        dashboard.duplicatePanel(panel);
-      },
-      shortcut: 'p d',
-    });
-
-    moreSubMenu.push({
-      text: t('panel.header-menu.copy', `Copy`),
-      onClick: () => {
-        DashboardInteractions.panelMenuItemClicked('copy');
-        dashboard.copyPanel(panel);
-      },
-    });
-
-    if (panel.parent instanceof LibraryVizPanel) {
-      // TODO: Implement lib panel unlinking
-    } else {
-      moreSubMenu.push({
-        text: t('panel.header-menu.create-library-panel', `Create library panel`),
+    if (config.featureToggles.newDashboardSharingComponent) {
+      const subMenu: PanelMenuItem[] = [];
+      subMenu.push({
+        text: t('share-panel.menu.share-link-title', 'Share link'),
+        iconClassName: 'link',
+        shortcut: 'p u',
         onClick: () => {
-          DashboardInteractions.panelMenuItemClicked('createLibraryPanel');
-          dashboard.showModal(
-            new ShareModal({
+          const drawer = new ShareDrawer({
+            shareView: shareDashboardType.link,
+            panelRef: panel.getRef(),
+          });
+
+          dashboard.showModal(drawer);
+        },
+      });
+      subMenu.push({
+        text: t('share-panel.menu.share-embed-title', 'Share embed'),
+        iconClassName: 'arrow',
+        shortcut: 'p e',
+        onClick: () => {
+          const drawer = new ShareDrawer({
+            shareView: shareDashboardType.embed,
+            panelRef: panel.getRef(),
+          });
+
+          dashboard.showModal(drawer);
+        },
+      });
+
+      if (contextSrv.isSignedIn && config.snapshotEnabled && dashboard.canEditDashboard()) {
+        subMenu.push({
+          text: t('share-panel.menu.share-snapshot-title', 'Share snapshot'),
+          iconClassName: 'camera',
+          shortcut: 'p s',
+          onClick: () => {
+            const drawer = new ShareDrawer({
+              shareView: shareDashboardType.snapshot,
               panelRef: panel.getRef(),
-              dashboardRef: dashboard.getRef(),
-              activeTab: shareDashboardType.libraryPanel,
-            })
-          );
+            });
+
+            dashboard.showModal(drawer);
+          },
+        });
+      }
+
+      items.push({
+        type: 'submenu',
+        text: t('panel.header-menu.share', 'Share'),
+        iconClassName: 'share-alt',
+        subMenu,
+        onClick: (e) => {
+          e.preventDefault();
+        },
+      });
+    } else {
+      items.push({
+        text: t('panel.header-menu.share', 'Share'),
+        iconClassName: 'share-alt',
+        onClick: () => {
+          dashboard.showModal(new ShareModal({ panelRef: panel.getRef() }));
+        },
+        shortcut: 'p s',
+      });
+    }
+
+    if (dashboard.state.isEditing && !isRepeat && !isEditingPanel) {
+      moreSubMenu.push({
+        text: t('panel.header-menu.duplicate', `Duplicate`),
+        iconClassName: 'file-copy-alt',
+        onClick: () => {
+          dashboard.duplicatePanel(panel);
+        },
+        shortcut: 'p d',
+      });
+    }
+
+    if (!isEditingPanel) {
+      moreSubMenu.push({
+        text: t('panel.header-menu.copy', `Copy`),
+        iconClassName: 'copy',
+        onClick: () => {
+          dashboard.copyPanel(panel);
         },
       });
     }
 
+    if (dashboard.state.isEditing && !isRepeat && !isEditingPanel) {
+      if (isLibraryPanel(panel)) {
+        moreSubMenu.push({
+          text: t('panel.header-menu.unlink-library-panel', `Unlink library panel`),
+          iconClassName: 'link-broken',
+          onClick: () => {
+            dashboard.showModal(
+              new UnlinkLibraryPanelModal({
+                panelRef: panel.getRef(),
+              })
+            );
+          },
+        });
+
+        moreSubMenu.push({
+          text: t('panel.header-menu.replace-library-panel', `Replace library panel`),
+          iconClassName: 'library-panel',
+          onClick: () => {
+            dashboard.onShowAddLibraryPanelDrawer(panel.getRef());
+          },
+        });
+      } else {
+        if (config.featureToggles.newDashboardSharingComponent) {
+          moreSubMenu.push({
+            text: t('share-panel.menu.new-library-panel-title', 'New library panel'),
+            iconClassName: 'plus-square',
+            onClick: () => {
+              const drawer = new ShareDrawer({
+                shareView: shareDashboardType.libraryPanel,
+                panelRef: panel.getRef(),
+              });
+
+              dashboard.showModal(drawer);
+            },
+          });
+        } else {
+          moreSubMenu.push({
+            text: t('panel.header-menu.create-library-panel', `Create library panel`),
+            onClick: () => {
+              dashboard.showModal(
+                new ShareModal({
+                  panelRef: panel.getRef(),
+                  activeTab: shareDashboardType.libraryPanel,
+                })
+              );
+            },
+          });
+        }
+      }
+    }
+
     moreSubMenu.push({
       text: t('panel.header-menu.new-alert-rule', `New alert rule`),
+      iconClassName: 'bell',
       onClick: (e) => onCreateAlert(panel),
     });
 
-    if (hasLegendOptions(panel.state.options)) {
+    if (hasLegendOptions(panel.state.options) && !isEditingPanel) {
       moreSubMenu.push({
         text: panel.state.options.legend.showLegend
           ? t('panel.header-menu.hide-legend', 'Hide legend')
           : t('panel.header-menu.show-legend', 'Show legend'),
+        iconClassName: panel.state.options.legend.showLegend ? 'legend-hide' : 'legend-show',
         onClick: (e) => {
           e.preventDefault();
           toggleVizPanelLegend(panel);
@@ -146,9 +234,10 @@ export function panelMenuBehavior(menu: VizPanelMenu) {
       });
     }
 
-    if (dashboard.canEditDashboard() && plugin && !plugin.meta.skipDataQuery) {
+    if (dashboard.canEditDashboard() && plugin && !plugin.meta.skipDataQuery && !isRepeat) {
       moreSubMenu.push({
         text: t('panel.header-menu.get-help', 'Get help'),
+        iconClassName: 'question-circle',
         onClick: (e: React.MouseEvent) => {
           e.preventDefault();
           onInspectPanel(panel, InspectTab.Help);
@@ -156,8 +245,8 @@ export function panelMenuBehavior(menu: VizPanelMenu) {
       });
     }
 
-    if (config.featureToggles.datatrails) {
-      addDataTrailPanelAction(dashboard, panel, items);
+    if (config.featureToggles.exploreMetrics) {
+      await addDataTrailPanelAction(dashboard, panel, items);
     }
 
     if (exploreMenuItem) {
@@ -166,6 +255,8 @@ export function panelMenuBehavior(menu: VizPanelMenu) {
 
     items.push(getInspectMenuItem(plugin, panel, dashboard));
 
+    // TODO: make sure that this works reliably with the reactive extension registry
+    // (we need to be able to know in advance what extensions should be loaded for this extension point, and make it possible to await for them.)
     const { extensions } = getPluginLinkExtensions({
       extensionPointId: PluginExtensionPoints.DashboardPanelMenu,
       context: createExtensionContext(panel, dashboard),
@@ -193,26 +284,29 @@ export function panelMenuBehavior(menu: VizPanelMenu) {
       });
     }
 
-    items.push({
-      text: '',
-      type: 'divider',
-    });
+    if (dashboard.state.isEditing && !isRepeat && !isEditingPanel) {
+      items.push({
+        text: '',
+        type: 'divider',
+      });
 
-    items.push({
-      text: t('panel.header-menu.remove', `Remove`),
-      iconClassName: 'trash-alt',
-      onClick: () => {
-        DashboardInteractions.panelMenuItemClicked('remove');
-        removePanel(dashboard, panel, true);
-      },
-      shortcut: 'p r',
-    });
+      items.push({
+        text: t('panel.header-menu.remove', `Remove`),
+        iconClassName: 'trash-alt',
+        onClick: () => {
+          onRemovePanel(dashboard, panel);
+        },
+        shortcut: 'p r',
+      });
+    }
 
     menu.setState({ items });
   };
 
   asyncFunc();
 }
+
+export const repeatPanelMenuBehavior = (menu: VizPanelMenu) => panelMenuBehavior(menu, true);
 
 async function getExploreMenuItem(panel: VizPanel): Promise<PanelMenuItem | undefined> {
   const exploreUrl = await tryGetExploreUrlForPanel(panel);
@@ -224,7 +318,6 @@ async function getExploreMenuItem(panel: VizPanel): Promise<PanelMenuItem | unde
     text: t('panel.header-menu.explore', `Explore`),
     iconClassName: 'compass',
     shortcut: 'p x',
-    onClick: () => DashboardInteractions.panelMenuItemClicked('explore'),
     href: exploreUrl,
   };
 }
@@ -243,7 +336,6 @@ function getInspectMenuItem(
       onClick: (e) => {
         e.preventDefault();
         locationService.partial({ inspect: panel.state.key, inspectTab: InspectTab.Data });
-        DashboardInteractions.panelMenuInspectClicked(InspectTab.Data);
       },
     });
 
@@ -254,7 +346,6 @@ function getInspectMenuItem(
         onClick: (e) => {
           e.preventDefault();
           locationService.partial({ inspect: panel.state.key, inspectTab: InspectTab.Query });
-          DashboardInteractions.panelMenuInspectClicked(InspectTab.Query);
         },
       });
     }
@@ -266,7 +357,6 @@ function getInspectMenuItem(
     onClick: (e) => {
       e.preventDefault();
       locationService.partial({ inspect: panel.state.key, inspectTab: InspectTab.JSON });
-      DashboardInteractions.panelMenuInspectClicked(InspectTab.JSON);
     },
   });
 
@@ -278,7 +368,6 @@ function getInspectMenuItem(
     onClick: (e) => {
       if (!e.isDefaultPrevented()) {
         locationService.partial({ inspect: panel.state.key, inspectTab: InspectTab.Data });
-        DashboardInteractions.panelMenuInspectClicked(InspectTab.Data);
       }
     },
     subMenu: inspectSubMenu.length > 0 ? inspectSubMenu : undefined,
@@ -314,13 +403,16 @@ export function getPanelLinks(panel: VizPanel) {
 
   const panelLinks = linkSupplier.getLinks(interpolate);
 
-  return panelLinks.map((panelLink) => ({
-    ...panelLink,
-    onClick: (e: any, origin: any) => {
-      DashboardInteractions.panelLinkClicked({ has_multiple_links: panelLinks.length > 1 });
-      panelLink.onClick?.(e, origin);
-    },
-  }));
+  return panelLinks.map((panelLink) => {
+    const updatedLink: LinkModel<VizPanel> = {
+      ...panelLink,
+      onClick: (e, origin) => {
+        DashboardInteractions.panelLinkClicked({ has_multiple_links: panelLinks.length > 1 });
+        panelLink.onClick?.(e, origin);
+      },
+    };
+    return updatedLink;
+  });
 }
 
 function createExtensionContext(panel: VizPanel, dashboard: DashboardScene): PluginExtensionPanelContext {
@@ -377,64 +469,25 @@ function createExtensionContext(panel: VizPanel, dashboard: DashboardScene): Plu
   };
 }
 
-export function removePanel(dashboard: DashboardScene, panel: VizPanel, ask: boolean) {
-  const vizPanelData = sceneGraph.getData(panel);
-  let panelHasAlert = false;
-
-  if (vizPanelData.state.data?.alertState) {
-    panelHasAlert = true;
-  }
-
-  if (ask !== false) {
-    const text2 =
-      panelHasAlert && !config.unifiedAlertingEnabled
-        ? 'Panel includes an alert rule. removing the panel will also remove the alert rule'
-        : undefined;
-    const confirmText = panelHasAlert ? 'YES' : undefined;
-
-    appEvents.publish(
-      new ShowConfirmModalEvent({
-        title: 'Remove panel',
-        text: 'Are you sure you want to remove this panel?',
-        text2: text2,
-        icon: 'trash-alt',
-        confirmText: confirmText,
-        yesText: 'Remove',
-        onConfirm: () => removePanel(dashboard, panel, false),
-      })
-    );
-
-    return;
-  }
-
-  const panels: SceneObject[] = [];
-  dashboard.state.body.forEachChild((child: SceneObject) => {
-    if (child.state.key !== panel.parent?.state.key) {
-      panels.push(child);
-    }
-  });
-
-  const layout = dashboard.state.body;
-
-  if (layout instanceof SceneGridLayout || SceneFlexLayout) {
-    layout.setState({
-      children: panels,
-    });
-  }
+export function onRemovePanel(dashboard: DashboardScene, panel: VizPanel) {
+  appEvents.publish(
+    new ShowConfirmModalEvent({
+      title: 'Remove panel',
+      text: 'Are you sure you want to remove this panel?',
+      icon: 'trash-alt',
+      yesText: 'Remove',
+      onConfirm: () => dashboard.removePanel(panel),
+    })
+  );
 }
 
 const onCreateAlert = async (panel: VizPanel) => {
-  DashboardInteractions.panelMenuItemClicked('create-alert');
-
   const formValues = await scenesPanelToRuleFormValues(panel);
   const ruleFormUrl = urlUtil.renderUrl('/alerting/new', {
     defaults: JSON.stringify(formValues),
     returnTo: location.pathname + location.search,
   });
-
   locationService.push(ruleFormUrl);
-
-  DashboardInteractions.panelMenuItemClicked('create-alert');
 };
 
 export function toggleVizPanelLegend(vizPanel: VizPanel): void {
@@ -446,8 +499,6 @@ export function toggleVizPanelLegend(vizPanel: VizPanel): void {
       },
     });
   }
-
-  DashboardInteractions.panelMenuItemClicked('toggleLegend');
 }
 
 function hasLegendOptions(optionsWithLegend: unknown): optionsWithLegend is OptionsWithLegend {
@@ -459,5 +510,4 @@ const onInspectPanel = (vizPanel: VizPanel, tab?: InspectTab) => {
     inspect: vizPanel.state.key,
     inspectTab: tab,
   });
-  DashboardInteractions.panelMenuInspectClicked(tab ?? InspectTab.Data);
 };

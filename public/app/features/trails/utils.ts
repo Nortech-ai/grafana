@@ -1,12 +1,13 @@
 import { urlUtil } from '@grafana/data';
 import { config, getDataSourceSrv } from '@grafana/runtime';
 import {
-  getUrlSyncManager,
+  AdHocFiltersVariable,
   sceneGraph,
   SceneObject,
   SceneObjectState,
   SceneObjectUrlValues,
   SceneTimeRange,
+  sceneUtils,
 } from '@grafana/scenes';
 
 import { getDatasourceSrv } from '../plugins/datasource_srv';
@@ -29,13 +30,12 @@ export function newMetricsTrail(initialDS?: string): DataTrail {
   return new DataTrail({
     initialDS,
     $timeRange: new SceneTimeRange({ from: 'now-1h', to: 'now' }),
-    //initialFilters: [{ key: 'job', operator: '=', value: 'grafana' }],
     embedded: false,
   });
 }
 
 export function getUrlForTrail(trail: DataTrail) {
-  const params = getUrlSyncManager().getUrlState(trail);
+  const params = sceneUtils.getUrlState(trail);
   return getUrlForValues(params);
 }
 
@@ -100,8 +100,18 @@ export function getColorByIndex(index: number) {
 export type SceneTimeRangeState = SceneObjectState & {
   from: string;
   to: string;
+  timeZone?: string;
 };
+
 export function isSceneTimeRangeState(state: SceneObjectState): state is SceneTimeRangeState {
   const keys = Object.keys(state);
   return keys.includes('from') && keys.includes('to');
+}
+
+export function getFilters(scene: SceneObject) {
+  const filters = sceneGraph.lookupVariable('filters', scene);
+  if (filters instanceof AdHocFiltersVariable) {
+    return filters.state.filters;
+  }
+  return null;
 }

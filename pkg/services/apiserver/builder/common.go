@@ -11,6 +11,8 @@ import (
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	"k8s.io/kube-openapi/pkg/common"
 	"k8s.io/kube-openapi/pkg/spec3"
+
+	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
 )
 
 // TODO: this (or something like it) belongs in grafana-app-sdk,
@@ -27,7 +29,7 @@ type APIGroupBuilder interface {
 		scheme *runtime.Scheme,
 		codecs serializer.CodecFactory,
 		optsGetter generic.RESTOptionsGetter,
-		dualWrite bool,
+		dualWrite grafanarest.DualWriteBuilder,
 	) (*genericapiserver.APIGroupInfo, error)
 
 	// Get OpenAPI definitions

@@ -1,5 +1,5 @@
-import { css } from '@emotion/css';
-import React, { useEffect, useState } from 'react';
+import { css, cx } from '@emotion/css';
+import { useEffect, useState } from 'react';
 
 import { GrafanaTheme2, urlUtil } from '@grafana/data';
 import { EmbeddedDashboardProps } from '@grafana/runtime';
@@ -64,12 +64,10 @@ function EmbeddedDashboardRenderer({ model, initialState, onStateChange }: Rende
   }
 
   return (
-    <div className={styles.canvas}>
+    <div className={cx(styles.canvas, controls && styles.canvasWithControls)}>
       {controls && (
-        <div className={styles.controls}>
-          {controls.map((control) => (
-            <control.Component key={control.state.key} model={control} />
-          ))}
+        <div className={styles.controlsWrapper}>
+          <controls.Component model={controls} />
         </div>
       )}
       <div className={styles.body}>
@@ -106,26 +104,34 @@ function getStyles(theme: GrafanaTheme2) {
   return {
     canvas: css({
       label: 'canvas-content',
-      display: 'flex',
-      flexDirection: 'column',
+      display: 'grid',
+      gridTemplateAreas: `
+        "panels"`,
+      gridTemplateColumns: `1fr`,
+      gridTemplateRows: '1fr',
       flexBasis: '100%',
       flexGrow: 1,
+    }),
+    canvasWithControls: css({
+      gridTemplateAreas: `
+        "controls"
+        "panels"`,
+      gridTemplateRows: 'auto 1fr',
     }),
     body: css({
       label: 'body',
       flexGrow: 1,
       display: 'flex',
       gap: '8px',
+      gridArea: 'panels',
       marginBottom: theme.spacing(2),
     }),
-    controls: css({
+    controlsWrapper: css({
       display: 'flex',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: theme.spacing(1),
-      top: 0,
-      zIndex: theme.zIndex.navbarFixed,
-      padding: theme.spacing(0, 0, 2, 0),
+      flexDirection: 'column',
+      flexGrow: 0,
+      gridArea: 'controls',
+      padding: theme.spacing(2, 0, 2, 2),
     }),
   };
 }

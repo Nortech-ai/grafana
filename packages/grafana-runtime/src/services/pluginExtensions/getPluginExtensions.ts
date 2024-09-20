@@ -2,16 +2,54 @@ import type { PluginExtension, PluginExtensionLink, PluginExtensionComponent } f
 
 import { isPluginExtensionComponent, isPluginExtensionLink } from './utils';
 
-export type GetPluginExtensions<T = PluginExtension> = ({
-  extensionPointId,
-  context,
-  limitPerPlugin,
-}: {
+export type GetPluginExtensions<T = PluginExtension> = (
+  options: GetPluginExtensionsOptions
+) => GetPluginExtensionsResult<T>;
+
+export type UsePluginExtensions<T = PluginExtension> = (
+  options: GetPluginExtensionsOptions
+) => UsePluginExtensionsResult<T>;
+
+export type GetPluginExtensionsOptions = {
+  extensionPointId: string;
+  // Make sure this object is properly memoized and not mutated.
+  context?: object | Record<string | symbol, unknown>;
+  limitPerPlugin?: number;
+};
+
+export type UsePluginComponentOptions = {
+  extensionPointId: string;
+  limitPerPlugin?: number;
+};
+
+export type GetPluginExtensionsResult<T = PluginExtension> = {
+  extensions: T[];
+};
+
+export type UsePluginExtensionsResult<T = PluginExtension> = {
+  extensions: T[];
+  isLoading: boolean;
+};
+
+export type UsePluginComponentResult<Props = {}> = {
+  component: React.ComponentType<Props> | undefined | null;
+  isLoading: boolean;
+};
+
+export type UsePluginComponentsResult<Props = {}> = {
+  components: Array<React.ComponentType<Props>>;
+  isLoading: boolean;
+};
+
+export type UsePluginLinksOptions = {
   extensionPointId: string;
   context?: object | Record<string | symbol, unknown>;
   limitPerPlugin?: number;
-}) => {
-  extensions: T[];
+};
+
+export type UsePluginLinksResult = {
+  isLoading: boolean;
+  links: PluginExtensionLink[];
 };
 
 let singleton: GetPluginExtensions | undefined;
@@ -41,10 +79,15 @@ export const getPluginLinkExtensions: GetPluginExtensions<PluginExtensionLink> =
   };
 };
 
-export const getPluginComponentExtensions: GetPluginExtensions<PluginExtensionComponent> = (options) => {
+// This getter doesn't support the `context` option (contextual information can be passed in as component props)
+export const getPluginComponentExtensions = <Props = {}>(options: {
+  extensionPointId: string;
+  limitPerPlugin?: number;
+}): { extensions: Array<PluginExtensionComponent<Props>> } => {
   const { extensions } = getPluginExtensions(options);
+  const componentExtensions = extensions.filter(isPluginExtensionComponent) as Array<PluginExtensionComponent<Props>>;
 
   return {
-    extensions: extensions.filter(isPluginExtensionComponent),
+    extensions: componentExtensions,
   };
 };

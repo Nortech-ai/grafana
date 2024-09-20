@@ -33,6 +33,10 @@ const (
 	FixedCloudViewerRole = "fixed:cloud:viewer"
 	FixedCloudEditorRole = "fixed:cloud:editor"
 	FixedCloudAdminRole  = "fixed:cloud:admin"
+
+	FixedCloudSupportTicketReader = "fixed:cloud:supportticket:reader"
+	FixedCloudSupportTicketEditor = "fixed:cloud:supportticket:editor"
+	FixedCloudSupportTicketAdmin  = "fixed:cloud:supportticket:admin"
 )
 
 // Roles definition
@@ -261,6 +265,41 @@ var (
 				Action: ActionSettingsWrite,
 				Scope:  ScopeSettingsOAuth("generic_oauth"),
 			},
+			{
+				Action: ActionSettingsRead,
+				Scope:  ScopeSettingsOAuth("ldap"),
+			},
+			{
+				Action: ActionSettingsWrite,
+				Scope:  ScopeSettingsOAuth("ldap"),
+			},
+		},
+	}
+
+	generalAuthConfigWriterRole = RoleDTO{
+		Name:        "fixed:general.auth.config:writer",
+		DisplayName: "General authentication config writer",
+		Description: "Read and update the Grafana instance's general authentication configuration.",
+		Group:       "Settings",
+		Permissions: []Permission{
+			{
+				Action: ActionSettingsRead,
+				Scope:  "settings:auth:oauth_allow_insecure_email_lookup",
+			},
+			{
+				Action: ActionSettingsWrite,
+				Scope:  "settings:auth:oauth_allow_insecure_email_lookup",
+			},
+		},
+	}
+
+	usagestatsReaderRole = RoleDTO{
+		Name:        "fixed:usagestats:reader",
+		DisplayName: "Usage stats report reader",
+		Description: "View usage statistics report",
+		Group:       "Statistics",
+		Permissions: []Permission{
+			{Action: ActionUsageStatsRead},
 		},
 	}
 )
@@ -299,19 +338,26 @@ func DeclareFixedRoles(service Service, cfg *setting.Cfg) error {
 		Role:   usersWriterRole,
 		Grants: []string{RoleGrafanaAdmin},
 	}
-
+	generalAuthConfigWriter := RoleRegistration{
+		Role:   generalAuthConfigWriterRole,
+		Grants: []string{RoleGrafanaAdmin},
+	}
 	// TODO: Move to own service when implemented
 	authenticationConfigWriter := RoleRegistration{
 		Role:   authenticationConfigWriterRole,
 		Grants: []string{RoleGrafanaAdmin},
 	}
 
-	if cfg.AuthConfigUIAdminAccess {
-		authenticationConfigWriter.Grants = append(authenticationConfigWriter.Grants, string(org.RoleAdmin))
+	usageStatsReader := RoleRegistration{
+		Role:   usagestatsReaderRole,
+		Grants: []string{RoleGrafanaAdmin},
 	}
 
-	return service.DeclareFixedRoles(ldapReader, ldapWriter, orgUsersReader, orgUsersWriter,
-		settingsReader, statsReader, usersReader, usersWriter, authenticationConfigWriter)
+	return service.DeclareFixedRoles(
+		ldapReader, ldapWriter, orgUsersReader, orgUsersWriter,
+		settingsReader, statsReader, usersReader, usersWriter,
+		authenticationConfigWriter, generalAuthConfigWriter, usageStatsReader,
+	)
 }
 
 func ConcatPermissions(permissions ...[]Permission) []Permission {
@@ -354,7 +400,7 @@ func ValidateBuiltInRoles(builtInRoles []string) error {
 			return ErrNoneRoleAssignment
 		}
 		if !org.RoleType(br).IsValid() && br != RoleGrafanaAdmin {
-			return fmt.Errorf("'%s' %w", br, ErrInvalidBuiltinRole)
+			return ErrInvalidBuiltinRole.Build(ErrInvalidBuiltinRoleData(br))
 		}
 	}
 	return nil

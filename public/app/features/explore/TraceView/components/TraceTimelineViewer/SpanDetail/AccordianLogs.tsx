@@ -16,12 +16,12 @@ import { css } from '@emotion/css';
 import { sortBy as _sortBy } from 'lodash';
 import * as React from 'react';
 
-import { GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2, TraceKeyValuePair, TraceLog } from '@grafana/data';
 import { Icon, useStyles2 } from '@grafana/ui';
 
 import { autoColor } from '../../Theme';
 import { TNil } from '../../types';
-import { TraceLog, TraceKeyValuePair, TraceLink } from '../../types/trace';
+import { TraceLink } from '../../types/trace';
 import { formatDuration } from '../utils';
 
 import AccordianKeyValues from './AccordianKeyValues';
@@ -59,13 +59,16 @@ const getStyles = (theme: GrafanaTheme2) => {
     AccordianKeyValuesItem: css({
       marginBottom: theme.spacing(0.5),
     }),
+    parenthesis: css({
+      color: `${autoColor(theme, '#777')}`,
+    }),
   };
 };
 
 export type AccordianLogsProps = {
   interactive?: boolean;
   isOpen: boolean;
-  linksGetter: ((pairs: TraceKeyValuePair[], index: number) => TraceLink[]) | TNil;
+  linksGetter?: ((pairs: TraceKeyValuePair[], index: number) => TraceLink[]) | TNil;
   logs: TraceLog[];
   onItemToggle?: (log: TraceLog) => void;
   onToggle?: () => void;
@@ -73,8 +76,16 @@ export type AccordianLogsProps = {
   timestamp: number;
 };
 
-export default function AccordianLogs(props: AccordianLogsProps) {
-  const { interactive, isOpen, linksGetter, logs, openedItems, onItemToggle, onToggle, timestamp } = props;
+export default function AccordianLogs({
+  interactive = true,
+  isOpen,
+  linksGetter,
+  logs,
+  openedItems,
+  onItemToggle,
+  onToggle,
+  timestamp,
+}: AccordianLogsProps) {
   let arrow: React.ReactNode | null = null;
   let HeaderComponent: 'span' | 'a' = 'span';
   let headerProps: {} | null = null;
@@ -100,33 +111,38 @@ export default function AccordianLogs(props: AccordianLogsProps) {
       </HeaderComponent>
       {isOpen && (
         <div className={styles.AccordianLogsContent}>
-          {_sortBy(logs, 'timestamp').map((log, i) => (
-            <AccordianKeyValues
-              // `i` is necessary in the key because timestamps can repeat
-              key={`${log.timestamp}-${i}`}
-              className={i < logs.length - 1 ? styles.AccordianKeyValuesItem : null}
-              data={log.fields || []}
-              highContrast
-              interactive={interactive}
-              isOpen={openedItems ? openedItems.has(log) : false}
-              label={`${formatDuration(log.timestamp - timestamp)}`}
-              linksGetter={linksGetter}
-              onToggle={interactive && onItemToggle ? () => onItemToggle(log) : null}
-            />
-          ))}
+          {_sortBy(logs, 'timestamp').map((log, i) => {
+            const formattedDuration = formatDuration(log.timestamp - timestamp);
+            const truncateLogNameInSummary = log.name && log.name.length > 20;
+            const formattedLogName = log.name && truncateLogNameInSummary ? log.name.slice(0, 20) + '...' : log.name;
+            const label = formattedLogName ? (
+              <span>
+                {formattedDuration} <span>({formattedLogName})</span>
+              </span>
+            ) : (
+              formattedDuration
+            );
+            return (
+              <AccordianKeyValues
+                // `i` is necessary in the key because timestamps can repeat
+                key={`${log.timestamp}-${i}`}
+                className={i < logs.length - 1 ? styles.AccordianKeyValuesItem : null}
+                data={log.fields || []}
+                logName={truncateLogNameInSummary ? log.name : undefined}
+                highContrast
+                interactive={interactive}
+                isOpen={openedItems ? openedItems.has(log) : false}
+                label={label}
+                linksGetter={linksGetter}
+                onToggle={interactive && onItemToggle ? () => onItemToggle(log) : null}
+              />
+            );
+          })}
           <small className={styles.AccordianLogsFooter}>
-            Log timestamps are relative to the start time of the full trace.
+            Event timestamps are relative to the start time of the full trace.
           </small>
         </div>
       )}
     </div>
   );
 }
-
-AccordianLogs.defaultProps = {
-  interactive: true,
-  linksGetter: undefined,
-  onItemToggle: undefined,
-  onToggle: undefined,
-  openedItems: undefined,
-};

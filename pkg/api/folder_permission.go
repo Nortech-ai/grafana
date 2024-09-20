@@ -8,8 +8,8 @@ import (
 	"github.com/grafana/grafana/pkg/api/apierrors"
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/response"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/metrics"
-	"github.com/grafana/grafana/pkg/services/auth/identity"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
 	"github.com/grafana/grafana/pkg/services/dashboards"
 	"github.com/grafana/grafana/pkg/services/dashboards/dashboardaccess"
@@ -38,7 +38,7 @@ func (hs *HTTPServer) GetFolderPermissionList(c *contextmodel.ReqContext) respon
 
 	acl, err := hs.getFolderACL(c.Req.Context(), c.SignedInUser, folder)
 	if err != nil {
-		return response.Error(500, "Failed to get folder permissions", err)
+		return response.Error(http.StatusInternalServerError, "Failed to get folder permissions", err)
 	}
 
 	filteredACLs := make([]*dashboards.DashboardACLInfoDTO, 0, len(acl))
@@ -83,7 +83,7 @@ func (hs *HTTPServer) UpdateFolderPermissions(c *contextmodel.ReqContext) respon
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}
 	if err := validatePermissionsUpdate(apiCmd); err != nil {
-		return response.Error(400, err.Error(), err)
+		return response.Error(http.StatusBadRequest, err.Error(), err)
 	}
 
 	uid := web.Params(c.Req)[":uid"]

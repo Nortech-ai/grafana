@@ -21,7 +21,7 @@ weight: -31
 
 # What's new in Grafana v7.4
 
-This topic includes the release notes for Grafana v7.4. For all details, read the full [CHANGELOG.md](https://github.com/grafana/grafana/blob/master/CHANGELOG.md).
+This topic includes the release notes for Grafana v7.4. For all details, read the full [CHANGELOG.md](https://github.com/grafana/grafana/blob/main/CHANGELOG.md).
 
 Check out the [New Features in 7.4](https://play.grafana.org/d/nP8rcffGk/1-new-features-in-v7-4?orgId=1) dashboard on Grafana Play!
 
@@ -181,7 +181,7 @@ The feature previously referred to as DataSource Start Pages or Cheat Sheets has
 
 [Queries]({{< relref "../panels-visualizations/query-transform-data#manage-queries" >}}) was updated as a result of this feature.
 
-For more information on adding a query editor help component to your plugin, refer to [Add a query editor help component](/developers/plugin-tools/create-a-plugin/extend-a-plugin/add-query-editor-help).
+For more information on adding a query editor help component to your plugin, refer to [Add a query editor help component](https://grafana.com/developers/plugin-tools/how-to-guides/data-source-plugins/add-query-editor-help).
 
 ### Variable inspector
 
@@ -245,4 +245,4 @@ In order to minimize the confusion with Constant variable usage, we've removed t
 
 ## Changelog
 
-Check out [CHANGELOG.md](https://github.com/grafana/grafana/blob/master/CHANGELOG.md) for a complete list of new features, changes, and bug fixes.
+Check out [CHANGELOG.md](https://github.com/grafana/grafana/blob/main/CHANGELOG.md) for a complete list of new features, changes, and bug fixes.

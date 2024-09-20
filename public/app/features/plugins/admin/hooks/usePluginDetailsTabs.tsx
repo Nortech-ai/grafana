@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom-v5-compat';
 
 import { GrafanaPlugin, NavModelItem, PluginIncludeType, PluginType } from '@grafana/data';
 import { config } from '@grafana/runtime';
@@ -35,6 +35,15 @@ export const usePluginDetailsTabs = (plugin?: CatalogPlugin, pageId?: PluginTabI
         active: PluginTabIds.VERSIONS === currentPageId,
       });
     }
+    if (isPublished && plugin?.details?.changelog) {
+      navModelChildren.push({
+        text: PluginTabLabels.CHANGELOG,
+        id: PluginTabIds.CHANGELOG,
+        icon: 'rocket',
+        url: `${pathname}?page=${PluginTabIds.CHANGELOG}`,
+        active: PluginTabIds.CHANGELOG === currentPageId,
+      });
+    }
 
     // Not extending the tabs with the config pages if the plugin is not installed
     if (!pluginConfig) {
@@ -51,7 +60,10 @@ export const usePluginDetailsTabs = (plugin?: CatalogPlugin, pageId?: PluginTabI
       });
     }
 
-    if (config.featureToggles.panelTitleSearch && pluginConfig.meta.type === PluginType.panel) {
+    if (
+      config.featureToggles.panelTitleSearch &&
+      (pluginConfig.meta.type === PluginType.panel || pluginConfig.meta.type === PluginType.datasource)
+    ) {
       navModelChildren.push({
         text: PluginTabLabels.USAGE,
         icon: 'list-ul',

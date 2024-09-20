@@ -12,9 +12,14 @@ import (
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/tests/apis"
 	"github.com/grafana/grafana/pkg/tests/testinfra"
+	"github.com/grafana/grafana/pkg/tests/testsuite"
 )
 
-func TestTestDatasource(t *testing.T) {
+func TestMain(m *testing.M) {
+	testsuite.Run(m)
+}
+
+func TestIntegrationTestDatasource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -37,7 +42,7 @@ func TestTestDatasource(t *testing.T) {
 
 	t.Run("Check discovery client", func(t *testing.T) {
 		disco := helper.GetGroupVersionInfoJSON("testdata.datasource.grafana.app")
-		// fmt.Printf("%s", string(disco))
+		// fmt.Printf("%s", disco)
 
 		require.JSONEq(t, `[
 			{
@@ -70,13 +75,12 @@ func TestTestDatasource(t *testing.T) {
 					{
 					  "responseKind": {
 						"group": "",
-						"kind": "Status",
+						"kind": "QueryDataResponse",
 						"version": ""
 					  },
 					  "subresource": "query",
 					  "verbs": [
-						"create",
-						"get"
+						"create"
 					  ]
 					},
 					{
