@@ -475,7 +475,7 @@ require (
 
 require (
 	github.com/getkin/kin-openapi v0.127.0 // @grafana/grafana-app-platform-squad
-	github.com/grafana/grafana/apps/playlist v0.0.0-20240917082838-e2bce38a7990 // @grafana/grafana-app-platform-squad
+	github.com/grafana/grafana/apps/playlist v0.0.0-20240920163611-ccf6fbebfae8 // @grafana/grafana-app-platform-squad
 )
 
 require (

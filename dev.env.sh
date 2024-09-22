@@ -4,11 +4,12 @@ export GF_AUTH_PROXY_AUTO_SIGN_UP="true"
 export GF_AUTH_PROXY_ENABLED="true"
 export GF_AUTH_PROXY_HEADER_NAME=X-Email
 export GF_AUTH_PROXY_HEADER_PROPERTY=email
-export GF_AUTH_PROXY_HEADERS="Name:X-Name Role:X-Grafana-Role Email:X-Email Groups:X-Urn%3Azitadel:iam:user:resourceowner:name"
+export GF_AUTH_PROXY_HEADERS="Name:X-Name Role:X-Grafana-Role Email:X-Email"
 export GF_DASHBOARDS_MIN_REFRESH_INTERVAL=100ms
+export GF_USERS_ALLOW_SIGN_UP="false"
+export GF_AUTH_ANONYMOUS_ENABLED="false"
 
 export GF_SERVER_ROOT_URL=https://grafana.default-shared-group.apps.dev.nor.tech/
-export GF_USERS_ALLOW_SIGN_UP="false"
 export NORTECH_BACKGROUND_COLOR='#e0e3ed'
 export NORTECH_BACKGROUND_COLOR_DARK='#04071e'
 export NORTECH_FONT_COLOR='#141821'

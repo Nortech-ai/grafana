@@ -24,13 +24,13 @@ COPY conf/defaults.ini ./conf/defaults.ini
 
 RUN apk add --no-cache make build-base python3
 
-RUN yarn install --immutable
+RUN yarn install
 
 COPY tsconfig.json .eslintrc .editorconfig .browserslistrc .prettierrc.js ./
 COPY scripts scripts
 COPY emails emails
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 RUN yarn build
 
 FROM ${GO_IMAGE} as go-builder
@@ -67,6 +67,8 @@ COPY pkg/storage/unified/apistore/go.* pkg/storage/unified/apistore/
 COPY pkg/semconv/go.* pkg/semconv/
 COPY pkg/aggregator/go.* pkg/aggregator/
 COPY apps/playlist/go.* apps/playlist/
+# Add this line to copy the playlist API package
+COPY apps/playlist/apis apps/playlist/apis
 
 RUN go mod download
 RUN if [[ "$BINGO" = "true" ]]; then \

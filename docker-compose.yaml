@@ -1,0 +1,27 @@
+services:
+  grafana:
+    user: root
+    container_name: 'nortech-edge-datasource'
+    network_mode: host
+    image: registry.gitlab.com/nortech.ai/nortech/grafana:test-plugin
+
+    ports:
+      - 3000:3000/tcp
+    volumes:
+      - ./dist:/var/lib/grafana/plugins/nortech-apidata-datasource
+      - ./provisioning:/etc/grafana/provisioning
+      - .:/root/nortech-apidata-datasource
+
+    environment:
+      NODE_ENV: development
+      GF_LOG_FILTERS: plugin.nortech-edge-datasource:debug
+      GF_LOG_LEVEL: debug
+      GF_DATAPROXY_LOGGING: 1
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: nortech-edge-datasource,nortech-cloud-datasource
+      NORTECH_PLUGINS: nortech-edge-datasource,nortech-cloud-datasource
+      NORTECH_GITLAB_TOKEN: token
+      GF_AUTH_ANONYMOUS: true
+      GF_AUTH_ANONYMOUS_ENABLED: true
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin

@@ -77,6 +77,22 @@ if [ ! -z "${GF_INSTALL_PLUGINS}" ]; then
   done
 fi
 
+if [ -n "${NORTECH_PLUGINS}" ] && [ -n "${NORTECH_GITLAB_TOKEN}" ]; then
+  OLDIFS=$IFS
+  IFS=','
+  for plugin in ${NORTECH_PLUGINS}; do
+    IFS=$OLDIFS
+    echo "Downloading ${plugin} from GitLab"
+    if curl --fail-with-body --output "${GF_PATHS_PLUGINS}/plugin.zip" --header "PRIVATE-TOKEN: ${NORTECH_GITLAB_TOKEN}" \
+      "https://gitlab.com/api/v4/projects/32964819/packages/generic/${plugin//\-/_}/latest/plugin.zip"; then
+      unzip -o "${GF_PATHS_PLUGINS}/plugin.zip" -d "${GF_PATHS_PLUGINS}"
+      rm "${GF_PATHS_PLUGINS}/plugin.zip"
+    else
+      echo "Failed to download ${plugin}."
+    fi
+  done
+fi
+
 exec grafana server                                         \
   --homepath="$GF_PATHS_HOME"                               \
   --config="$GF_PATHS_CONFIG"                               \
