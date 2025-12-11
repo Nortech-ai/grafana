@@ -61,7 +61,7 @@ export function LicenseChrome({ header, editionNotice, subheader, children }: Pr
           }}
         >
           <img
-            src={grafanaIconSvg}
+            src={window.nortechCustomization?.iconUrl || grafanaIconSvg}
             alt="Grafana"
             width="80px"
             style={{ position: 'absolute', left: '23px', top: '20px' }}

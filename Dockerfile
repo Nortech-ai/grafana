@@ -174,7 +174,7 @@ WORKDIR $GF_PATHS_HOME
 
 # Install dependencies
 RUN if grep -i -q alpine /etc/issue; then \
-  apk add --no-cache ca-certificates bash curl tzdata musl-utils && \
+  apk add --no-cache ca-certificates bash curl tzdata musl-utils jq && \
   apk info -vv | sort; \
   elif grep -i -q ubuntu /etc/issue; then \
   DEBIAN_FRONTEND=noninteractive && \
@@ -240,8 +240,22 @@ COPY --from=js-src /tmp/grafana/LICENSE ./
 EXPOSE 3000
 
 ARG RUN_SH=./packaging/docker/run.sh
+ARG INSTALL_PLUGINS_SH=./packaging/docker/install-plugins.sh
 
 COPY ${RUN_SH} /run.sh
+COPY ${INSTALL_PLUGINS_SH} /install-plugins.sh
+
+ARG GF_INSTALL_PLUGINS="grafana-mqtt-datasource"
+ARG NORTECH_PLUGINS="nortech-edge-datasource,nortech-cloud-datasource"
+ARG NORTECH_GITHUB_TOKEN
+
+RUN chmod +x /run.sh /install-plugins.sh && \
+    GF_INSTALL_PLUGINS=${GF_INSTALL_PLUGINS} \
+    NORTECH_PLUGINS=${NORTECH_PLUGINS} \
+    NORTECH_GITHUB_TOKEN=${NORTECH_GITHUB_TOKEN} \
+    /install-plugins.sh && \
+    chown -R "grafana:$GF_GID_NAME" "${GF_PATHS_PLUGINS}" && \
+    chmod -R 777 "${GF_PATHS_PLUGINS}"
 
 USER "$GF_UID"
 ENTRYPOINT [ "/run.sh" ]

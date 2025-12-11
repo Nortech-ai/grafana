@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -148,6 +149,28 @@ func (hs *HTTPServer) setIndexViewData(c *contextmodel.ReqContext) (*dtos.IndexV
 	hasAccess := ac.HasAccess(hs.AccessControl, c)
 	hasEditPerm := hasAccess(ac.EvalAny(ac.EvalPermission(dashboards.ActionDashboardsCreate), ac.EvalPermission(dashboards.ActionFoldersCreate)))
 
+	branding := &dtos.NortechBranding{
+		Name:                os.Getenv("NORTECH_NAME"),
+		LogoUrl:             template.URL(os.Getenv("NORTECH_LOGO_URL")),
+		LogoUrlDark:         template.URL(os.Getenv("NORTECH_LOGO_URL_DARK")),
+		IconUrl:             template.URL(os.Getenv("NORTECH_ICON_URL")),
+		IconUrlDark:         template.URL(os.Getenv("NORTECH_ICON_URL_DARK")),
+		PrimaryColor:        os.Getenv("NORTECH_PRIMARY_COLOR"),
+		PrimaryColorDark:    os.Getenv("NORTECH_PRIMARY_COLOR_DARK"),
+		WarnColor:           os.Getenv("NORTECH_WARN_COLOR"),
+		WarnColorDark:       os.Getenv("NORTECH_WARN_COLOR_DARK"),
+		BackgroundColor:     os.Getenv("NORTECH_BACKGROUND_COLOR"),
+		BackgroundColorDark: os.Getenv("NORTECH_BACKGROUND_COLOR_DARK"),
+		FontUrl:             template.URL(os.Getenv("NORTECH_FONT_URL")),
+		FontColor:           os.Getenv("NORTECH_FONT_COLOR"),
+		FontColorDark:       os.Getenv("NORTECH_FONT_COLOR_DARK"),
+	}
+
+	loadingLogo := branding.IconUrl
+	if loadingLogo == "" {
+		loadingLogo = template.URL(assets.ContentDeliveryURL + "public/build/img/grafana_icon.svg")
+	}
+
 	data := dtos.IndexViewData{
 		User: &dtos.CurrentUser{
 			Id:                         userID,
@@ -194,9 +217,10 @@ func (hs *HTTPServer) setIndexViewData(c *contextmodel.ReqContext) (*dtos.IndexV
 		AppTitle:                            "Grafana",
 		NavTree:                             navTree,
 		Nonce:                               c.RequestNonce,
-		LoadingLogo:                         template.URL(assets.ContentDeliveryURL + "public/build/img/grafana_icon.svg"), // #nosec G203
+		LoadingLogo:                         loadingLogo, // #nosec G203
 		IsDevelopmentEnv:                    hs.Cfg.Env == setting.Dev,
 		Assets:                              assets,
+		NortechBranding:                     branding,
 	}
 
 	if hs.Cfg.CSPEnabled {

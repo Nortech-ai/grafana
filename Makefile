@@ -416,7 +416,7 @@ shellcheck: $(SH_FILES) ## Run checks for shell scripts.
 ##@ Docker
 
 TAG_SUFFIX=$(if $(WIRE_TAGS)!=oss,-$(WIRE_TAGS))
-PLATFORM=linux/amd64
+PLATFORM=linux/amd64,linux/arm64
 
 # default to a production build for frontend
 #
@@ -441,7 +441,7 @@ endif
 build-docker-full: ## Build Docker image for development.
 	@echo "build docker container mode=($(DOCKER_JS_NODE_ENV_FLAG))"
 	tar -ch . | \
-	docker buildx build - \
+	docker buildx build \
 	--platform $(PLATFORM) \
 	--build-arg NODE_ENV=$(DOCKER_JS_NODE_ENV_FLAG) \
 	--build-arg JS_NODE_ENV=$(DOCKER_JS_NODE_ENV_FLAG) \
@@ -451,8 +451,11 @@ build-docker-full: ## Build Docker image for development.
 	--build-arg WIRE_TAGS=$(WIRE_TAGS) \
 	--build-arg COMMIT_SHA=$$(git rev-parse HEAD) \
 	--build-arg BUILD_BRANCH=$$(git rev-parse --abbrev-ref HEAD) \
-	--tag grafana/grafana$(TAG_SUFFIX):dev \
-	$(DOCKER_BUILD_ARGS)
+	--build-arg GF_INSTALL_PLUGINS=$(GF_INSTALL_PLUGINS) \
+	--build-arg NORTECH_PLUGINS=$(NORTECH_PLUGINS) \
+	--build-arg NORTECH_GITHUB_TOKEN=$(NORTECH_GITHUB_TOKEN) \
+	--progress=plain \
+	--push -t registry.apps.nor.tech/grafana:pedrotest .
 
 .PHONY: build-docker-full-ubuntu
 build-docker-full-ubuntu: ## Build Docker image based on Ubuntu for development.

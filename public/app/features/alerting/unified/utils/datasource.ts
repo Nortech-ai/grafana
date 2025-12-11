@@ -10,7 +10,7 @@ import {
 } from 'app/plugins/datasource/alertmanager/types';
 import { AccessControlAction } from 'app/types/accessControl';
 import {
-  DataSourceRulesSourceIdentifier as DataSourceRulesSourceIdentifier,
+  DataSourceRulesSourceIdentifier,
   GrafanaRulesSourceIdentifier,
   GrafanaRulesSourceSymbol,
   RuleIdentifier,
@@ -115,7 +115,7 @@ export function isAlertmanagerDataSourceInterestedInAlerts(
 
 const grafanaAlertManagerDataSource: AlertManagerDataSource = {
   name: GRAFANA_RULES_SOURCE_NAME,
-  imgUrl: grafanaIconSvg,
+  imgUrl: window.nortechCustomization?.iconUrl || grafanaIconSvg,
   hasConfigurationAPI: true,
 };
 

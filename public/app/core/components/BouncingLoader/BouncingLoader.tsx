@@ -16,7 +16,7 @@ export function BouncingLoader() {
       aria-label={t('bouncing-loader.label', 'Loading')}
     >
       <div className={styles.bounce}>
-        <img alt="" src={grafanaIconSvg} className={styles.logo} />
+        <img alt="" src={window.nortechCustomization?.iconUrl || grafanaIconSvg} className={styles.logo} />
       </div>
     </div>
   );

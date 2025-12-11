@@ -433,7 +433,10 @@ function getGrafanaCloudPhantomPlugin(): DataSourcePluginMeta {
         'datasources.get-grafana-cloud-phantom-plugin.description.hosted-graphite-prometheus-and-loki',
         'Hosted Graphite, Prometheus, and Loki'
       ),
-      logos: { small: grafanaIconSvg, large: grafanaIconSvg },
+      logos: {
+        small: window.nortechCustomization?.iconUrl || grafanaIconSvg,
+        large: window.nortechCustomization?.iconUrl || grafanaIconSvg,
+      },
       author: { name: 'Grafana Labs' },
       links: [
         {

@@ -26,7 +26,7 @@ export default function InternalAlertmanager({ onEditConfiguration }: Props) {
   return (
     <AlertmanagerCard
       name={BUILTIN_ALERTMANAGER_NAME}
-      logo={grafanaIconSvg}
+      logo={window.nortechCustomization?.iconUrl || grafanaIconSvg}
       status={status}
       receiving={isReceiving}
       onEditConfiguration={handleEditConfiguration}

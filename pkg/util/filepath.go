@@ -156,6 +156,10 @@ type subFile struct {
 // doesn't include any separators or elements that shouldn't be there
 // like ., .., //.
 func CleanRelativePath(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+
 	cleanPath := filepath.Clean(filepath.Join("/", path))
 	rel, err := filepath.Rel("/", cleanPath)
 	if err != nil {

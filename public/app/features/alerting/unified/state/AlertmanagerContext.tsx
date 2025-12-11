@@ -55,7 +55,7 @@ const AlertmanagerProvider = ({ children, accessType, alertmanagerSourceName }: 
             {
               name: EXTRA_CONFIG_UID,
               displayName: 'Grafana (imported)',
-              imgUrl: grafanaIconSvg,
+              imgUrl: window.nortechCustomization?.iconUrl || grafanaIconSvg,
               hasConfigurationAPI: false,
               handleGrafanaManagedAlerts: true,
             },
