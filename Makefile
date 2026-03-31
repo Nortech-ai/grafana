@@ -455,7 +455,7 @@ build-docker-full: ## Build Docker image for development.
 	--build-arg NORTECH_PLUGINS=$(NORTECH_PLUGINS) \
 	--build-arg NORTECH_GITHUB_TOKEN=$(NORTECH_GITHUB_TOKEN) \
 	--progress=plain \
-	--push -t registry.apps.nor.tech/grafana:pedrotest .
+	--push -t registry.apps.nor.tech/grafana:latest .
 
 .PHONY: build-docker-full-ubuntu
 build-docker-full-ubuntu: ## Build Docker image based on Ubuntu for development.
