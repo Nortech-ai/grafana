@@ -84,7 +84,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
-    "@babel/core": "7.28.0",
+    "@babel/core": "7.29.6",
     "@babel/preset-env": "7.28.0",
     "@babel/runtime": "7.28.2",
     "@crowdin/crowdin-api-client": "^1.42.0",
