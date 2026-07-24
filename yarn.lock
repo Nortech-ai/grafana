@@ -3717,7 +3717,7 @@ __metadata:
     "@types/systemjs": "npm:6.15.3"
     "@types/uuid": "npm:10.0.0"
     i18next-cli: "npm:^1.24.22"
-    immutable: "npm:5.1.4"
+    immutable: "npm:5.1.8"
     jest: "npm:^29.6.4"
     lodash: "npm:4.17.21"
     react: "npm:18.3.1"
@@ -3853,7 +3853,7 @@ __metadata:
     hoist-non-react-statics: "npm:3.3.2"
     i18next: "npm:^25.0.0"
     i18next-browser-languagedetector: "npm:^8.0.0"
-    immutable: "npm:5.1.4"
+    immutable: "npm:5.1.8"
     is-hotkey: "npm:0.2.0"
     jquery: "npm:3.7.1"
     lodash: "npm:4.17.21"
@@ -19619,7 +19619,7 @@ __metadata:
     i18next-cli: "npm:^1.24.22"
     i18next-pseudo: "npm:^2.2.1"
     immer: "npm:10.2.0"
-    immutable: "npm:5.1.4"
+    immutable: "npm:5.1.8"
     infinite-viewer: "npm:^0.29.1"
     ini: "npm:^5.0.0"
     ix: "npm:^7.0.0"
@@ -20706,10 +20706,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"immutable@npm:5.1.4, immutable@npm:^5.0.2":
-  version: 5.1.4
-  resolution: "immutable@npm:5.1.4"
-  checksum: 10/0655b33af249ff99c7a56f9e6d7aee632af2dc25758710ddf224bda645f66dd2dd98119c0d86986895ea52cc889b6c5127a848c6fba21aadabdc4c5ead04be2b
+"immutable@npm:5.1.8":
+  version: 5.1.8
+  resolution: "immutable@npm:5.1.8"
+  checksum: 10/f6907f3cf932860bf609c635283e3073ba5c978fcdd63e365fe4daa43c34ffef0037db0d3009d8803d9ebc2f1e2a00f06c8cac738250fbe715fb1484c7132f0c
   languageName: node
   linkType: hard
 
@@ -20724,6 +20724,13 @@ __metadata:
   version: 4.3.7
   resolution: "immutable@npm:4.3.7"
   checksum: 10/37d963c5050f03ae5f3714ba7a43d469aa482051087f4c65d673d1501c309ea231d87480c792e19fa85e2eaf965f76af5d0aa92726505f3cfe4af91619dfb80b
+  languageName: node
+  linkType: hard
+
+"immutable@npm:^5.0.2":
+  version: 5.1.4
+  resolution: "immutable@npm:5.1.4"
+  checksum: 10/0655b33af249ff99c7a56f9e6d7aee632af2dc25758710ddf224bda645f66dd2dd98119c0d86986895ea52cc889b6c5127a848c6fba21aadabdc4c5ead04be2b
   languageName: node
   linkType: hard
 
